@@ -4,6 +4,8 @@ Each child directory is an independently versionable package in the root Bun wor
 share the root Git history and root Beads database; they must not contain nested `.git` or `.beads`
 directories.
 
+`@openduck/openduck-base` is an active native DSH bundle. It owns typed native settings and a browser settings card for provider/MCP configuration state, and a native read-only history panel for explicitly configured external CLI project directories. Its optional provider and Cua Driver MCP overlays use DSH's real host contracts; credentials remain in DSH credentials and enabling an overlay requires a restart.
+
 `beads-memory-explorer` and `workspace-groups` are static, fail-closed UI state packages. Their
 DSH manifests are explicitly disabled: the pinned profile has reviewed additive UI primitives, but
 the required Controller routes/authenticated bridge and package registration are not yet composed

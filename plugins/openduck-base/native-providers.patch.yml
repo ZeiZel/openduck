@@ -1,0 +1,17 @@
+# Optional native providers. Apply this patch to an OpenDuck DSH profile, then
+# restart the host. It starts no child process until a preset invokes a tool.
+- insert:
+    - id: openduck-subagent-codex
+      name: '@deepseek-ai/dsh-subagent-codex'
+      config: { env: {} }
+    - id: openduck-subagent-claude
+      name: '@deepseek-ai/dsh-subagent-claude-code'
+      config: { env: {} }
+    - id: openduck-subagent-kimi
+      name: '@deepseek-ai/dsh-subagent-acp'
+      config:
+        providerName: kimi
+        command: kimi
+        args: [acp]
+        permission: reject
+        env: {}

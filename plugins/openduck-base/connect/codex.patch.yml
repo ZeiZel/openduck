@@ -1,0 +1,4 @@
+- insert:
+    - id: openduck-subagent-codex
+      name: '@deepseek-ai/dsh-subagent-codex'
+      config: { env: {} }

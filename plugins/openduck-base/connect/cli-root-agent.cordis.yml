@@ -1,0 +1,16 @@
+# OpenDuck-managed CLI root-chat agent plane.
+#
+# This is deliberately a complete, text-only composition. It must remain free
+# of planning, workflow, skill, terminal, filesystem, and `tool-*` rows: those
+# plugins can register model-visible schemas even when a neighbouring tool row
+# is disabled. The root adapter rejects schemas as a defence in depth, but this
+# preset keeps a normal DSH turn text-only before the adapter is invoked.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are a text-only assistant. You have no filesystem, terminal, browser,
+      MCP, delegation, or other host tools. Do not claim to have performed an
+      action outside this conversation.
+    complete: true
+    includeRuntimeContext: false

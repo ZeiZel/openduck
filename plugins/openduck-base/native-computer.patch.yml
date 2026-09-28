@@ -1,0 +1,14 @@
+# Explicit local computer-use opt-in. The generic DSH MCP client starts this
+# stdio server, discovers its tools and registers them as native MCP tools.
+# It does not grant TCC permissions and deliberately does not use cua-driver
+# --direct or any bypass flag.
+- insert:
+    - id: openduck-mcp-computer
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        transport: stdio
+        serverName: computer
+        command: cua-driver
+        args: [mcp]
+        env: {}
+        failOnStartupError: false

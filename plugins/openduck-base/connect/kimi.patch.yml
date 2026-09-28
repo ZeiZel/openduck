@@ -1,0 +1,9 @@
+- insert:
+    - id: openduck-subagent-kimi
+      name: '@deepseek-ai/dsh-subagent-acp'
+      config:
+        providerName: kimi
+        command: kimi
+        args: [acp]
+        permission: reject
+        env: {}

@@ -142,7 +142,7 @@ cleanup_bundle_archive() {
   rm -rf -- "$PACK_DIR"
 }
 trap cleanup_bundle_archive EXIT
-COREPACK_ENABLE_PROJECT_SPEC=0 pnpm --dir "$ROOT_DIR/plugins/openduck-base" pack --pack-destination "$PACK_DIR"
+(cd "$ROOT_DIR/plugins/openduck-base" && npm pack --pack-destination "$PACK_DIR" --ignore-scripts)
 set -- "$PACK_DIR"/*.tgz
 if (($# != 1)) || [[ ! -f "$1" ]]; then
   printf 'dsh-install: expected exactly one OpenDuck base bundle archive\n' >&2

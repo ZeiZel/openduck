@@ -1,0 +1,21 @@
+#!/usr/bin/env node
+let buffer = ''
+const send = value => process.stdout.write(`${JSON.stringify(value)}\n`)
+process.stdin.setEncoding('utf8')
+process.stdin.on('data', chunk => {
+  buffer += chunk
+  for (;;) {
+    const index = buffer.indexOf('\n')
+    if (index < 0) return
+    const line = buffer.slice(0, index); buffer = buffer.slice(index + 1)
+    let request
+    try { request = JSON.parse(line) } catch { continue }
+    if (request.method === 'initialize') send({ jsonrpc: '2.0', id: request.id, result: {} })
+    if (request.method === 'thread/start' || request.method === 'thread/resume') send({ jsonrpc: '2.0', id: request.id, result: { thread: { id: 'mock-thread' } } })
+    if (request.method === 'turn/start') {
+      send({ jsonrpc: '2.0', id: request.id, result: { turn: { id: 'mock-turn' } } })
+      send({ jsonrpc: '2.0', method: 'item/completed', params: { threadId: 'mock-thread', turnId: 'mock-turn', item: { type: 'agentMessage', phase: 'final_answer', text: 'Synthetic CLI root reply' } } })
+      send({ jsonrpc: '2.0', method: 'turn/completed', params: { threadId: 'mock-thread', turn: { id: 'mock-turn', status: 'completed' } } })
+    }
+  }
+})

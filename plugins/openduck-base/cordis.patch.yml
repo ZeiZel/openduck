@@ -7,3 +7,4 @@
         controller:
           enabled: false
         externalPackages: []
+        cliRoot: { enabled: false }

@@ -1,0 +1,10 @@
+- insert:
+    - id: openduck-mcp-computer
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        transport: stdio
+        serverName: computer
+        command: cua-driver
+        args: [mcp]
+        env: {}
+        failOnStartupError: false
