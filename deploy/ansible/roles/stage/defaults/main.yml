@@ -1,0 +1,11 @@
+---
+stage_fixed_target_root: "/Library/Application Support/OpenDuck"
+stage_release_nonce_store_path: "/private/var/db/openduck-release-nonces.json"
+stage_release_artifact_types:
+  - core
+  - provider_runtime
+  - provider_plugin
+  - provider_daemon
+  - provider_topology
+  - policy
+  - helper

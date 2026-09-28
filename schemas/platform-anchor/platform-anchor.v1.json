@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "openduck.platform-anchor.v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version","request_id","namespace","operation","key","expected_version","next_version","digest"],
+      "properties": {
+        "schema_version": {"const":"platform-anchor.v1"},
+        "request_id": {"type":"string","minLength":1,"maxLength":128},
+        "namespace": {"enum":["admission","chat","runtime-lease"]},
+        "operation": {"const":"load"},
+        "key": {"type":"string","minLength":1,"maxLength":256},
+        "expected_version": {"const":0},
+        "next_version": {"const":0},
+        "digest": {"const":""}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version","request_id","namespace","operation","key","expected_version","next_version","digest"],
+      "properties": {
+        "schema_version": {"const":"platform-anchor.v1"},
+        "request_id": {"type":"string","minLength":1,"maxLength":128},
+        "namespace": {"enum":["admission","chat","runtime-lease"]},
+        "operation": {"const":"cas"},
+        "key": {"type":"string","minLength":1,"maxLength":256},
+        "expected_version": {"type":"integer","minimum":0},
+        "next_version": {"type":"integer","minimum":1},
+        "digest": {"type":"string","pattern":"^sha256:[0-9a-f]{64}$","maxLength":71}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version","request_id","ok","namespace","version"],
+      "properties": {
+        "schema_version": {"const":"platform-anchor.v1"},
+        "request_id": {"type":"string","minLength":1,"maxLength":128},
+        "ok": {"const":true},
+        "namespace": {"enum":["admission","chat","runtime-lease"]},
+        "version": {"type":"integer","minimum":0},
+        "digest": {"type":"string","oneOf":[{"const":""},{"type":"string","pattern":"^sha256:[0-9a-f]{64}$","maxLength":71}]},
+        "error": {"maxLength":0}
+      },
+      "allOf": [
+        {"if":{"properties":{"version":{"const":0}}},"then":{"properties":{"digest":{"const":""}}}},
+        {"if":{"properties":{"version":{"type":"integer","minimum":1}}},"then":{"required":["digest"],"properties":{"digest":{"type":"string","pattern":"^sha256:[0-9a-f]{64}$","maxLength":71}}}}
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version","request_id","ok","namespace","error"],
+      "properties": {
+        "schema_version": {"const":"platform-anchor.v1"},
+        "request_id": {"type":"string","minLength":1,"maxLength":128},
+        "ok": {"const":false},
+        "namespace": {"enum":["admission","chat","runtime-lease"]},
+        "error": {"type":"string","minLength":1,"maxLength":512}
+      }
+    }
+  ]
+}

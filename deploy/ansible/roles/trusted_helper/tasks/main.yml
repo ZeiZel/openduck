@@ -1,0 +1,286 @@
+---
+# Exactly one authority is selected here.  A staged installer is never an
+# authority: its digest remains release data, but it is not executable by
+# Ansible.  An existing malformed installation is an upgrade failure, never a
+# reason to fall back to bootstrap input.
+- name: Derive current admitted installer digest as release data
+  ansible.builtin.set_fact:
+    trusted_helper_current_manifest_helper_digest: >-
+      {{ openduck_release_artifacts |
+         selectattr('type', 'equalto', 'helper') |
+         selectattr('path', 'equalto', 'bin/openduck-installer') |
+         map(attribute='digest') | first }}
+  no_log: true
+  become: false
+
+- name: Inspect fixed installed helper without following links
+  ansible.builtin.stat:
+    path: "{{ trusted_helper_installer_path }}"
+    follow: false
+    checksum_algorithm: sha256
+  register: trusted_helper_installed_helper_stat
+  check_mode: false
+  no_log: true
+  become: true
+
+- name: Record whether an installed helper already exists
+  ansible.builtin.set_fact:
+    trusted_helper_installed_helper_exists: "{{ trusted_helper_installed_helper_stat.stat.exists | default(false) | bool }}"
+  no_log: true
+  become: false
+
+- name: Inspect fixed-root ancestry for an installed upgrade
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /Library
+    - /Library/Application Support
+    - /Library/Application Support/OpenDuck
+  register: trusted_helper_root_stats
+  check_mode: false
+  no_log: true
+  become: true
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Require trusted fixed-root ancestry for an installed upgrade
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+      - item.stat.isdir | default(false)
+      - not (item.stat.islnk | default(false))
+      - (item.stat.uid | default(-1) | int) == 0
+      - (item.stat.gid | default(-1) | int) == 0
+      - item.stat.gr_name | default('') == 'wheel'
+      - item.stat.mode | default('') is match('^[0-7]{3,4}$')
+      - (item.stat.mode | default(''))[-2] not in ['2', '3', '6', '7']
+      - (item.stat.mode | default(''))[-1] not in ['2', '3', '6', '7']
+    fail_msg: "installed helper fixed-root ancestry is not trusted"
+  loop: "{{ trusted_helper_root_stats.results | default([]) }}"
+  no_log: true
+  become: false
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Require exact installed helper metadata for an upgrade
+  ansible.builtin.assert:
+    that:
+      - trusted_helper_installed_helper_stat.stat.isreg | default(false)
+      - not (trusted_helper_installed_helper_stat.stat.islnk | default(false))
+      - (trusted_helper_installed_helper_stat.stat.nlink | default(0) | int) == 1
+      - (trusted_helper_installed_helper_stat.stat.uid | default(-1) | int) == 0
+      - (trusted_helper_installed_helper_stat.stat.gid | default(-1) | int) == 0
+      - trusted_helper_installed_helper_stat.stat.gr_name | default('') == 'wheel'
+      - trusted_helper_installed_helper_stat.stat.mode | default('') == '0700'
+    fail_msg: "installed helper is not a root:wheel 0700 non-linked regular file"
+  no_log: true
+  become: false
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Inspect installed configured release selector
+  ansible.builtin.stat:
+    path: "{{ trusted_helper_root }}/configured.release"
+    follow: false
+  register: trusted_helper_active_release_stat
+  check_mode: false
+  no_log: true
+  become: true
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Require safe installed configured release selector
+  ansible.builtin.assert:
+    that:
+      - trusted_helper_active_release_stat.stat.isreg | default(false)
+      - not (trusted_helper_active_release_stat.stat.islnk | default(false))
+      - (trusted_helper_active_release_stat.stat.nlink | default(0) | int) == 1
+      - (trusted_helper_active_release_stat.stat.uid | default(-1) | int) == 0
+      - (trusted_helper_active_release_stat.stat.gid | default(-1) | int) == 0
+      - trusted_helper_active_release_stat.stat.gr_name | default('') == 'wheel'
+      - trusted_helper_active_release_stat.stat.mode | default('') == '0644'
+    fail_msg: "installed configured release selector is unsafe"
+  no_log: true
+  become: false
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Read installed configured release selector after metadata verification
+  ansible.builtin.slurp:
+    src: "{{ trusted_helper_root }}/configured.release"
+  register: trusted_helper_active_release_raw
+  no_log: true
+  become: true
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Derive bounded installed configured release identifier
+  ansible.builtin.set_fact:
+    trusted_helper_active_release_id: "{{ trusted_helper_active_release_raw.content | b64decode | trim }}"
+  no_log: true
+  become: false
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Require bounded installed configured release identifier
+  ansible.builtin.assert:
+    that:
+      - trusted_helper_active_release_id is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')
+    fail_msg: "installed configured release selector is malformed"
+  no_log: true
+  become: false
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Inspect root-owned installed admitted manifest
+  ansible.builtin.stat:
+    path: "{{ trusted_helper_root }}/releases/controller/{{ trusted_helper_active_release_id }}/release-manifest.v2.json"
+    follow: false
+  register: trusted_helper_manifest_stat
+  check_mode: false
+  no_log: true
+  become: true
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Require exact installed admitted manifest metadata
+  ansible.builtin.assert:
+    that:
+      - trusted_helper_manifest_stat.stat.isreg | default(false)
+      - not (trusted_helper_manifest_stat.stat.islnk | default(false))
+      - (trusted_helper_manifest_stat.stat.nlink | default(0) | int) == 1
+      - (trusted_helper_manifest_stat.stat.uid | default(-1) | int) == 0
+      - (trusted_helper_manifest_stat.stat.gid | default(-1) | int) == 0
+      - trusted_helper_manifest_stat.stat.gr_name | default('') == 'wheel'
+      - trusted_helper_manifest_stat.stat.mode | default('') == '0440'
+      - (trusted_helper_manifest_stat.stat.size | default(0) | int) > 1
+      - (trusted_helper_manifest_stat.stat.size | default(1048577) | int) <= 1048576
+    fail_msg: "installed admitted ManifestV2 is unsafe"
+  no_log: true
+  become: false
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Read root-owned installed admitted manifest after metadata verification
+  ansible.builtin.slurp:
+    src: "{{ trusted_helper_root }}/releases/controller/{{ trusted_helper_active_release_id }}/release-manifest.v2.json"
+  register: trusted_helper_manifest_raw
+  no_log: true
+  become: true
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Extract installed helper digest from admitted ManifestV2
+  ansible.builtin.set_fact:
+    trusted_helper_installed_helper_digest: >-
+      {{ trusted_helper_manifest_raw.content | b64decode |
+         openduck_installed_manifest_helper_digest(trusted_helper_active_release_id) }}
+  no_log: true
+  become: false
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Require installed helper hash to match admitted installed ManifestV2
+  ansible.builtin.assert:
+    that:
+      - trusted_helper_installed_helper_stat.stat.checksum == trusted_helper_installed_helper_digest
+    fail_msg: "installed helper digest does not match root-owned admitted ManifestV2"
+  no_log: true
+  become: false
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Select installed helper authority for an upgrade
+  ansible.builtin.set_fact:
+    trusted_helper_path: "{{ trusted_helper_installer_path }}"
+    trusted_helper_digest: "{{ trusted_helper_installed_helper_digest }}"
+    trusted_helper_authority: installed_upgrade
+  no_log: true
+  become: false
+  when: trusted_helper_installed_helper_exists | bool
+
+- name: Inspect fixed install root before fresh bootstrap selection
+  ansible.builtin.stat:
+    path: "{{ trusted_helper_root }}"
+    follow: false
+  register: trusted_helper_fresh_root_stat
+  check_mode: false
+  no_log: true
+  become: true
+  when: not (trusted_helper_installed_helper_exists | bool)
+
+- name: Refuse bootstrap over a pre-existing fixed install root
+  ansible.builtin.assert:
+    that:
+      - not (trusted_helper_fresh_root_stat.stat.exists | default(false))
+    fail_msg: "fresh bootstrap requires an absent fixed install root; repair existing installation as an upgrade"
+  no_log: true
+  become: false
+  when: not (trusted_helper_installed_helper_exists | bool)
+
+- name: Require complete independent bootstrap helper inputs
+  ansible.builtin.assert:
+    that:
+      - openduck_bootstrap_helper_path | default('', true) is string
+      - openduck_bootstrap_helper_path | default('', true) is match('^/')
+      - openduck_bootstrap_helper_sha256 | default('', true) is string
+      - openduck_bootstrap_helper_sha256 | default('', true) is match('^[0-9a-f]{64}$')
+    fail_msg: "fresh install requires both absolute openduck_bootstrap_helper_path and independent lowercase SHA-256"
+  no_log: true
+  become: false
+  when: not (trusted_helper_installed_helper_exists | bool)
+
+- name: Reject bootstrap helper overlap with staged or fixed install roots
+  ansible.builtin.assert:
+    that:
+      - openduck_bootstrap_helper_path != staged_source
+      - not openduck_bootstrap_helper_path.startswith(staged_source ~ '/')
+      - openduck_bootstrap_helper_path != trusted_helper_root
+      - not openduck_bootstrap_helper_path.startswith(trusted_helper_root ~ '/')
+    fail_msg: "bootstrap helper must be independently supplied outside staged_source and the fixed install root"
+  no_log: true
+  become: false
+  when: not (trusted_helper_installed_helper_exists | bool)
+
+- name: Bind bootstrap authority inputs before filesystem inspection
+  ansible.builtin.set_fact:
+    trusted_helper_bootstrap_contract: >-
+      {{ openduck_bootstrap_helper_path |
+         openduck_bootstrap_helper_contract(
+           openduck_bootstrap_helper_sha256, staged_source, trusted_helper_root) }}
+  no_log: true
+  become: false
+  when: not (trusted_helper_installed_helper_exists | bool)
+
+- name: Inspect explicit bootstrap helper without following links
+  ansible.builtin.stat:
+    path: "{{ trusted_helper_bootstrap_contract.path }}"
+    follow: false
+    checksum_algorithm: sha256
+  register: trusted_helper_bootstrap_stat
+  check_mode: false
+  no_log: true
+  become: false
+  when: not (trusted_helper_installed_helper_exists | bool)
+
+- name: Require safe bootstrap helper and exact independent digest
+  ansible.builtin.assert:
+    that:
+      - trusted_helper_bootstrap_stat.stat.isreg | default(false)
+      - not (trusted_helper_bootstrap_stat.stat.islnk | default(false))
+      - (trusted_helper_bootstrap_stat.stat.nlink | default(0) | int) == 1
+      - trusted_helper_bootstrap_stat.stat.mode | default('') is match('^[0-7]{3,4}$')
+      - (trusted_helper_bootstrap_stat.stat.mode | default(''))[-2] not in ['2', '3', '6', '7']
+      - (trusted_helper_bootstrap_stat.stat.mode | default(''))[-1] not in ['2', '3', '6', '7']
+      - trusted_helper_bootstrap_stat.stat.checksum == openduck_bootstrap_helper_sha256
+    fail_msg: "bootstrap helper is unsafe or its independent digest does not match"
+  no_log: true
+  become: false
+  when: not (trusted_helper_installed_helper_exists | bool)
+
+- name: Select explicit bootstrap helper authority for a fresh install
+  ansible.builtin.set_fact:
+    trusted_helper_path: "{{ trusted_helper_bootstrap_contract.path }}"
+    trusted_helper_digest: "{{ openduck_bootstrap_helper_sha256 }}"
+    trusted_helper_authority: fresh_bootstrap
+  no_log: true
+  become: false
+  when: not (trusted_helper_installed_helper_exists | bool)
+
+- name: Require exactly one trusted helper authority
+  ansible.builtin.assert:
+    that:
+      - trusted_helper_authority | default('') in ['installed_upgrade', 'fresh_bootstrap']
+      - trusted_helper_path | default('') is match('^/')
+      - trusted_helper_digest | default('') is match('^[0-9a-f]{64}$')
+    fail_msg: "trusted helper selection failed closed"
+  no_log: true
+  become: false

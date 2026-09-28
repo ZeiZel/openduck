@@ -1,0 +1,12 @@
+{
+  "schema": "openduck.provisioning-error.v2",
+  "version": 2,
+  "run_id": "aaaaaaaa-1111",
+  "release_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "phase": "stop",
+  "reason_code": "launchd_shutdown_failed",
+  "primary_reason_code": "launchd_shutdown_failed",
+  "compensation_reason_code": "",
+  "scope": "installer",
+  "recovery_state": "manual_review"
+}

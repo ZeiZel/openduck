@@ -1,0 +1,26 @@
+---
+- name: Project signed inactive provider artifacts
+  ansible.builtin.set_fact:
+    provider_daemons_artifacts: "{{ openduck_release_artifacts | selectattr('type', 'equalto', 'provider_daemon') | list }}"
+    provider_daemons_topology_artifacts: "{{ openduck_release_artifacts | selectattr('type', 'equalto', 'provider_topology') | list }}"
+  no_log: true
+  become: false
+
+- name: Require paired closed inactive provider contracts
+  ansible.builtin.assert:
+    that:
+      - provider_daemons_artifacts | length == provider_daemons_topology_artifacts | length
+      - provider_daemons_artifacts | length > 0
+      - provider_daemons_artifacts | map(attribute='path') | select('match', '^providers/(claude|codex|deepseek|kimi|qwen)/openduck-provider-(claude|codex|deepseek|kimi|qwen)$') | list | length == provider_daemons_artifacts | length
+      - provider_daemons_topology_artifacts | map(attribute='path') | select('match', '^providers/(claude|codex|deepseek|kimi|qwen)/topology.json$') | list | length == provider_daemons_topology_artifacts | length
+    fail_msg: "signed provider daemon/topology contract is unavailable"
+  no_log: true
+  become: false
+
+- name: Preserve base deployment as inactive-only
+  ansible.builtin.set_fact:
+    provider_daemons_activation_state: inactive
+    provider_daemons_principals_provisioned: false
+    provider_daemons_jobs_provisioned: false
+    provider_daemons_channels_provisioned: false
+  become: false

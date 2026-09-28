@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(git rev-parse --show-toplevel)
+"$root/scripts/check-main-only-git.sh"
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -n "$local_ref" ]] || continue
+  [[ "$local_ref" == refs/heads/main && "$remote_ref" == refs/heads/main ]] || { printf 'main-only guard: push must be refs/heads/main -> refs/heads/main (got %s -> %s)\n' "$local_ref" "$remote_ref" >&2; exit 1; }
+  [[ "$local_sha" != 0000000000000000000000000000000000000000 ]] || { printf 'main-only guard: deleting main is not allowed\n' >&2; exit 1; }
+  [[ "$remote_sha" == 0000000000000000000000000000000000000000 || "$remote_sha" == "$local_sha" ]] || { git merge-base --is-ancestor "$remote_sha" "$local_sha" || { printf 'main-only guard: force pushes are not allowed\n' >&2; exit 1; }; }
+done

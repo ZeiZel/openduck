@@ -1,0 +1,599 @@
+diff -ruN '--exclude=node_modules' '--exclude=lib' '--exclude=dist' a/packages/acp/acp/src/index.ts b/packages/acp/acp/src/index.ts
+--- a/packages/acp/acp/src/index.ts	2026-08-19 20:25:43.583003562 +0300
++++ b/packages/acp/acp/src/index.ts	2026-08-19 20:22:55.268226872 +0300
+@@ -34,7 +34,7 @@
+   type Stream,
+ } from '@agentclientprotocol/sdk'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+-import { SessionId, type SessionEvent, type TurnEndReason } from '@deepseek-ai/dsh-session'
++import { requireAdmission, SessionId, withAdmission, type SessionEvent, type TurnEndReason } from '@deepseek-ai/dsh-session'
+ // Side-effect type import: declaration-merges the approval waterfall answered below.
+ import type {} from '@deepseek-ai/dsh-user-approval'
+ import { AcpContentError, admitAcpPrompt, assistantBlockToAcp, supportsAcpImagePrompts } from './content.ts'
+@@ -369,13 +369,16 @@
+           if (ctx.agents.get(record.agent.id) !== record.agent) {
+             throw internalError('prompt was not queued: the agent was disposed outside the bridge')
+           }
+-          const content = await admitAcpPrompt(
++          // Verify before ACP content admission: this is before saveImages,
++          // so a raw image cannot create a blob on an unconfigured fork.
++          const receipt = await requireAdmission(params, record.agent.id, params.prompt, ctx.openduckAdmission)
++          const content = await withAdmission(receipt, () => admitAcpPrompt(
+             ctx,
+             record.agent,
+             params.prompt,
+             imagePromptEnabled,
+             admissionController.signal,
+-          )
++          ))
+           // No await may separate this final abort check from followup: a
+           // cancellation that wins admission must never enqueue a late turn.
+           admissionController.signal.throwIfAborted()
+@@ -386,7 +389,7 @@
+           inflight.messageId = message.id
+           inflight.messageQueued = true
+           try {
+-            record.agent.followup(message)
++            await withAdmission(receipt, () => record.agent.followup(message))
+           } catch (error: unknown) {
+             // The typed same-process seam may fail synchronously before durable
+             // inbox receipt; restore the pre-operation boundary for mapping.
+diff -ruN '--exclude=node_modules' '--exclude=lib' '--exclude=dist' a/packages/core/agent-loop/src/agent.ts b/packages/core/agent-loop/src/agent.ts
+--- a/packages/core/agent-loop/src/agent.ts	2026-08-19 20:25:44.637135571 +0300
++++ b/packages/core/agent-loop/src/agent.ts	2026-08-19 20:22:30.502649511 +0300
+@@ -28,7 +28,7 @@
+ import type { Scope } from '@deepseek-ai/dsh-scope'
+ import { createScope } from '@deepseek-ai/dsh-scope'
+ import type { EpochHeader, RequestContext, Session, SessionId, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
+-import { canonicalHeader, headerEquals } from '@deepseek-ai/dsh-session'
++import { canonicalHeader, consumeModelAdmission, headerEquals } from '@deepseek-ai/dsh-session'
+ import { joinContextSections, renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+ import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
+ import type { Context } from '@deepseek-ai/cordis'
+@@ -349,6 +349,9 @@
+       )
+       const assembler = new BlockAssembler()
+       const chunkSeqs: number[] = []
++      // The receipt was bound by Session.append to the exact user-content
++      // digest. No model call proceeds unless this request contains it.
++      consumeModelAdmission(this.session.id, request.messages)
+       const gate = (this.loopCtx as Context & { openduckModelDispatchGate?: ModelDispatchGate }).openduckModelDispatchGate
+         ?? denyModelDispatch
+       await gate(request)
+diff -ruN '--exclude=node_modules' '--exclude=lib' '--exclude=dist' a/packages/core/session/src/index.ts b/packages/core/session/src/index.ts
+--- a/packages/core/session/src/index.ts	2026-08-19 20:25:42.587721965 +0300
++++ b/packages/core/session/src/index.ts	2026-08-19 20:21:12.674563086 +0300
+@@ -7,6 +7,7 @@
+  */
+ 
+ import { Context, Service } from '@deepseek-ai/cordis'
++import { assertAppendAdmission, assertSeedAdmission } from './openduck-admission.ts'
+ import { isAbsolute } from 'node:path'
+ import { deepFreeze } from '@deepseek-ai/dsh-llm'
+ import { scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
+@@ -24,6 +25,7 @@
+ export { SessionPreparation } from './preparation.ts'
+ export type { SessionPreparationOptions } from './preparation.ts'
+ export type { AssistantMessage, ToolResultMessage, UserMessage } from '@deepseek-ai/dsh-llm'
++export * from './openduck-admission.ts'
+ export { isJsonValue, snapshotJsonValue } from './json.ts'
+ export type { JsonValue } from './json.ts'
+ export { interruptedTurnClosers, TOOL_NOT_STARTED, TOOL_OUTCOME_UNKNOWN } from './repair.ts'
+@@ -502,6 +504,7 @@
+     header?: SessionHeader,
+     mode: 'snapshot' | 'restore' = 'snapshot',
+   ) {
++    assertSeedAdmission(id, seed)
+     const restoredHeader = mode === 'restore'
+       ? validateRestoredSessionHeader(id, header)
+       : undefined
+@@ -615,6 +618,7 @@
+     if (dataSnapshot === undefined) {
+       throw new Error(`session event "${type}" carries non-JSON-serializable data`)
+     }
++    assertAppendAdmission(this.id, type, dataSnapshot)
+     assertSupportedRequestHeader(type, dataSnapshot, `session event "${type}"`)
+     const surfaceMetadataSnapshot = snapshotJsonValue(surfaceMetadata)
+     if (surfaceMetadataSnapshot === undefined) {
+diff -ruN '--exclude=node_modules' '--exclude=lib' '--exclude=dist' a/packages/core/session/src/openduck-admission.ts b/packages/core/session/src/openduck-admission.ts
+--- a/packages/core/session/src/openduck-admission.ts	1970-01-01 03:00:00.000000000 +0300
++++ b/packages/core/session/src/openduck-admission.ts	2026-08-19 20:26:53.828288101 +0300
+@@ -0,0 +1,271 @@
++/**
++ * Fail-closed Controller admission primitives for model-visible session input.
++ *
++ * The module carries no signing key or network capability. A deployment must
++ * inject the Controller verifier; otherwise every raw ingress is rejected.
++ */
++
++import { AsyncLocalStorage } from 'node:async_hooks'
++import { createHash } from 'node:crypto'
++import type {} from '@deepseek-ai/cordis'
++import type { SessionEvent, SessionId } from './types.ts'
++
++/** Maximum validity of one Controller admission proof. */
++export const MAX_ADMISSION_TTL_MS = 5 * 60_000
++
++export interface CloudAdmissionProof {
++  readonly admission_id: string
++  readonly target_session_id: string
++  readonly prompt_digest: string
++  readonly content_digest: string
++  readonly policy_digest: string
++  readonly runtime_digest: string
++  readonly nonce: string
++  readonly issued_at: string
++  readonly expires_at: string
++  readonly max_uses: 1
++  readonly controller_signature: string
++}
++
++export interface AdmissionTarget {
++  readonly sessionId: string
++  readonly promptDigest: string
++  readonly contentDigest: string
++  readonly policyDigest: string
++  readonly runtimeDigest: string
++}
++
++const receiptMarker = Symbol('openduck admission receipt')
++
++/** Opaque one-use outcome of signature and binding verification. */
++export interface AdmissionReceipt {
++  readonly admission_id: string
++  readonly append_attempt_id: string
++  readonly target: AdmissionTarget
++  readonly consumed_at: string
++  readonly [receiptMarker]: true
++}
++
++export interface VerifiedAdmission { readonly proof: CloudAdmissionProof }
++
++/** Controller-owned signature verifier. It has no default allow implementation. */
++export interface AdmissionVerifier {
++  verify(proof: CloudAdmissionProof, target: AdmissionTarget, now: number): Promise<VerifiedAdmission | undefined> | VerifiedAdmission | undefined
++}
++
++/** Injected Controller snapshot values and verifier for one DSH composition. */
++export interface AdmissionRuntime {
++  readonly policyDigest: string
++  readonly runtimeDigest: string
++  readonly ledger: AdmissionLedger
++  readonly now?: () => number
++}
++
++declare module '@deepseek-ai/cordis' {
++  interface Context {
++    /** Controller-installed proof verifier; absence is a permanent deny. */
++    openduckAdmission?: AdmissionRuntime
++  }
++}
++
++export class AdmissionDeniedError extends Error {
++  readonly code = 'OPENDUCK_ADMISSION_REQUIRED'
++
++  constructor() {
++    super('raw model-visible ingress is disabled; a single-use Controller admission is required')
++    this.name = 'AdmissionDeniedError'
++  }
++}
++
++/** Permanent deny for uncomposed forks. */
++export const denyAllAdmission: AdmissionVerifier = { verify: () => undefined }
++
++/** Serialize JSON deterministically before binding Controller and DSH values. */
++function canonical(value: unknown): string {
++  if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value)
++  if (typeof value === 'number') {
++    if (!Number.isFinite(value)) throw new AdmissionDeniedError()
++    return JSON.stringify(value)
++  }
++  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
++  if (typeof value !== 'object' || value === null) throw new AdmissionDeniedError()
++  const record = value as Record<string, unknown>
++  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonical(record[key])}`).join(',')}}`
++}
++
++/** SHA-256 digest used on both admission targets and the later model request. */
++export function admissionDigest(value: unknown): string {
++  return createHash('sha256').update(canonical(value)).digest('hex')
++}
++
++/** Build the DSH-owned session/content binding around Controller snapshot digests. */
++export function admissionTarget(sessionId: string, content: unknown, runtime?: AdmissionRuntime): AdmissionTarget {
++  const digest = admissionDigest(content)
++  return {
++    sessionId,
++    promptDigest: digest,
++    contentDigest: digest,
++    policyDigest: runtime?.policyDigest ?? '',
++    runtimeDigest: runtime?.runtimeDigest ?? '',
++  }
++}
++
++function proofFromPayload(payload: unknown): CloudAdmissionProof | undefined {
++  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined
++  const proof = (payload as Record<string, unknown>).admission
++  if (typeof proof !== 'object' || proof === null || Array.isArray(proof)) return undefined
++  const value = proof as Record<string, unknown>
++  if (typeof value.admission_id !== 'string' || typeof value.target_session_id !== 'string'
++    || typeof value.prompt_digest !== 'string' || typeof value.content_digest !== 'string'
++    || typeof value.policy_digest !== 'string' || typeof value.runtime_digest !== 'string'
++    || typeof value.nonce !== 'string' || typeof value.issued_at !== 'string'
++    || typeof value.expires_at !== 'string' || value.max_uses !== 1
++    || typeof value.controller_signature !== 'string') return undefined
++  if ([value.admission_id, value.target_session_id, value.prompt_digest, value.content_digest,
++    value.policy_digest, value.runtime_digest, value.nonce, value.controller_signature].some(part => part.length === 0)) return undefined
++  return value as unknown as CloudAdmissionProof
++}
++
++function validProof(proof: CloudAdmissionProof, target: AdmissionTarget, now: number): boolean {
++  const issued = Date.parse(proof.issued_at)
++  const expires = Date.parse(proof.expires_at)
++  return Number.isFinite(issued) && Number.isFinite(expires)
++    && issued <= now && now < expires && issued < expires && expires - issued <= MAX_ADMISSION_TTL_MS
++    && proof.max_uses === 1
++    && proof.target_session_id === target.sessionId
++    && proof.prompt_digest === target.promptDigest
++    && proof.content_digest === target.contentDigest
++    && proof.policy_digest === target.policyDigest
++    && proof.runtime_digest === target.runtimeDigest
++}
++
++/** Controller-backed one-use receipt registry. */
++export class AdmissionLedger {
++  private readonly used = new Set<string>()
++  private readonly verifier: AdmissionVerifier
++
++  constructor(verifier: AdmissionVerifier) {
++    this.verifier = verifier
++  }
++
++  async admit(payload: unknown, target: AdmissionTarget, now = Date.now()): Promise<AdmissionReceipt> {
++    const proof = proofFromPayload(payload)
++    if (proof === undefined || this.used.has(proof.admission_id) || !validProof(proof, target, now)) throw new AdmissionDeniedError()
++    const verified = await this.verifier.verify(proof, target, now)
++    if (verified === undefined || verified.proof !== proof) throw new AdmissionDeniedError()
++    this.used.add(proof.admission_id)
++    return Object.freeze({
++      admission_id: proof.admission_id,
++      append_attempt_id: `${proof.admission_id}:${proof.nonce}`,
++      target,
++      consumed_at: new Date(now).toISOString(),
++      [receiptMarker]: true as const,
++    })
++  }
++}
++
++/** Validate and consume a payload proof before any durable producer work. */
++export async function requireAdmission(
++  payload: unknown,
++  sessionId: string,
++  content: unknown,
++  runtime?: AdmissionRuntime,
++): Promise<AdmissionReceipt> {
++  const target = admissionTarget(sessionId, content, runtime)
++  return await (runtime?.ledger ?? new AdmissionLedger(denyAllAdmission)).admit(payload, target, runtime?.now?.() ?? Date.now())
++}
++
++const currentReceipt = new AsyncLocalStorage<AdmissionReceipt>()
++const pendingBySession = new Map<string, AdmissionReceipt[]>()
++interface DispatchAuthorization {
++  assistantPending: boolean
++  readonly expectedToolCalls: Set<string>
++}
++const dispatchAuthorizations = new Map<string, DispatchAuthorization>()
++
++/** Keep a verified receipt bound across the exact producer call stack. */
++export async function withAdmission<T>(receipt: AdmissionReceipt, work: () => Promise<T> | T): Promise<T> {
++  return await currentReceipt.run(receipt, work)
++}
++
++function activeFor(sessionId: string, content: unknown): AdmissionReceipt {
++  const receipt = currentReceipt.getStore()
++  if (receipt === undefined || receipt[receiptMarker] !== true
++    || receipt.target.sessionId !== sessionId || receipt.target.contentDigest !== admissionDigest(content)) {
++    throw new AdmissionDeniedError()
++  }
++  return receipt
++}
++
++/** Guard seed/import/resume/fork reconstruction before it can reach a loop. */
++export function assertSeedAdmission(sessionId: SessionId, seed: readonly SessionEvent[] | undefined): void {
++  if (seed === undefined || !seed.some(event => (event as { type: string }).type === 'user/message' || (event as { type: string }).type === 'agent/inbox/spliced')) return
++  activeFor(sessionId, seed)
++}
++
++/** Guard the direct Session.append durable ingress seam. */
++export function assertAppendAdmission(sessionId: SessionId, type: string, data: unknown): void {
++  if (type === 'user/message') {
++    const receipt = activeFor(sessionId, (data as { content?: unknown }).content)
++    const pending = pendingBySession.get(sessionId) ?? []
++    pending.push(receipt)
++    pendingBySession.set(sessionId, pending)
++    return
++  }
++  if (type === 'tool/result') {
++    const authorization = dispatchAuthorizations.get(sessionId)
++    const source = (data as { message?: { source?: { kind?: unknown, callId?: unknown } } }).message?.source
++    if (authorization === undefined || source?.kind !== 'tool' || typeof source.callId !== 'string'
++      || !authorization.expectedToolCalls.delete(source.callId)) throw new AdmissionDeniedError()
++    return
++  }
++  if (type === 'assistant/message') {
++    // Assistant history is model-visible on the next step. It may originate
++    // only from the model dispatch that consumed this session's receipt.
++    const authorization = dispatchAuthorizations.get(sessionId)
++    if (authorization === undefined || !authorization.assistantPending) throw new AdmissionDeniedError()
++    authorization.assistantPending = false
++    const content = (data as { message?: { content?: unknown } }).message?.content
++    if (Array.isArray(content)) {
++      for (const block of content) {
++        if (typeof block === 'object' && block !== null
++          && (block as { type?: unknown }).type === 'tool-call'
++          && typeof (block as { id?: unknown }).id === 'string') {
++          authorization.expectedToolCalls.add((block as { id: string }).id)
++        }
++      }
++    }
++    if (authorization.expectedToolCalls.size === 0) dispatchAuthorizations.delete(sessionId)
++    return
++  }
++  if (type === 'turn/end') {
++    dispatchAuthorizations.delete(sessionId)
++    return
++  }
++  if (type !== 'agent/inbox/spliced') return
++  const inserted = (data as { inserted?: unknown }).inserted
++  if (!Array.isArray(inserted) || inserted.length === 0) return
++  const insertedContent = inserted.length === 1
++    ? (inserted[0] as { content?: unknown }).content
++    : inserted.map(message => (message as { content?: unknown }).content)
++  const receipt = activeFor(sessionId, insertedContent)
++  const pending = pendingBySession.get(sessionId) ?? []
++  pending.push(receipt)
++  pendingBySession.set(sessionId, pending)
++}
++
++/** Consume the exact receipt(s) that admitted content before llm.stream. */
++export function consumeModelAdmission(sessionId: SessionId, messages: readonly unknown[]): readonly AdmissionReceipt[] {
++  const pending = pendingBySession.get(sessionId)
++  if (pending === undefined || pending.length === 0) throw new AdmissionDeniedError()
++  const contentDigests = new Set(messages
++    .filter((message): message is { role?: unknown, content?: unknown } => typeof message === 'object' && message !== null)
++    .filter(message => message.role === 'user')
++    .map(message => admissionDigest(message.content)))
++  if (pending.some(receipt => receipt.target.sessionId !== sessionId || !contentDigests.has(receipt.target.contentDigest))) {
++    throw new AdmissionDeniedError()
++  }
++  pendingBySession.delete(sessionId)
++  dispatchAuthorizations.set(sessionId, { assistantPending: true, expectedToolCalls: new Set() })
++  return pending
++}
+diff -ruN '--exclude=node_modules' '--exclude=lib' '--exclude=dist' a/packages/core/session/tests/openduck-admission.spec.ts b/packages/core/session/tests/openduck-admission.spec.ts
+--- a/packages/core/session/tests/openduck-admission.spec.ts	1970-01-01 03:00:00.000000000 +0300
++++ b/packages/core/session/tests/openduck-admission.spec.ts	2026-08-19 20:26:21.063578458 +0300
+@@ -0,0 +1,107 @@
++import {
++  AdmissionDeniedError,
++  AdmissionLedger,
++  admissionTarget,
++  assertAppendAdmission,
++  assertSeedAdmission,
++  consumeModelAdmission,
++  requireAdmission,
++  withAdmission,
++  type CloudAdmissionProof,
++} from '../src/openduck-admission.ts'
++
++const content = [{ type: 'text', text: 'opaque admitted input' }]
++const target = admissionTarget('s-1', content, { policyDigest: 'policy', runtimeDigest: 'runtime', ledger: undefined as never })
++const proof: CloudAdmissionProof = {
++  admission_id: 'a-1', target_session_id: target.sessionId,
++  prompt_digest: target.promptDigest, content_digest: target.contentDigest,
++  policy_digest: target.policyDigest, runtime_digest: target.runtimeDigest,
++  nonce: 'n-1', issued_at: new Date(1_000).toISOString(), expires_at: new Date(2_000).toISOString(),
++  max_uses: 1, controller_signature: 'valid-signature',
++}
++
++const verifier = {
++  verify(candidate: CloudAdmissionProof) {
++    return candidate.controller_signature === 'valid-signature' ? { proof: candidate } : undefined
++  },
++}
++const ledger = new AdmissionLedger(verifier)
++const runtime = { policyDigest: 'policy', runtimeDigest: 'runtime', ledger, now: () => 1_500 }
++
++const receipt = await requireAdmission({ admission: proof }, 's-1', content, runtime)
++await withAdmission(receipt, () => assertAppendAdmission('s-1' as never, 'agent/inbox/spliced', {
++  inserted: [{ content }],
++}))
++consumeModelAdmission('s-1' as never, [{ role: 'user', content }])
++assertAppendAdmission('s-1' as never, 'assistant/message', { message: { content: [] } })
++for (const injected of [
++  () => assertAppendAdmission('s-1' as never, 'assistant/message', { message: { content: [] } }),
++  () => assertAppendAdmission('s-1' as never, 'tool/result', { message: { source: { kind: 'tool', callId: 'forged' } } }),
++]) {
++  let denied = false
++  try { injected() } catch (error) { denied = error instanceof AdmissionDeniedError }
++  if (!denied) throw new Error('replayed dispatch accepted an injected model-visible event')
++}
++
++const foreignContent = [{ type: 'text', text: 'different admitted input' }]
++const foreignTarget = admissionTarget('s-2', foreignContent, runtime)
++const foreignProof: CloudAdmissionProof = {
++  ...proof, admission_id: 'a-foreign', target_session_id: foreignTarget.sessionId,
++  prompt_digest: foreignTarget.promptDigest, content_digest: foreignTarget.contentDigest,
++}
++const foreignReceipt = await requireAdmission({ admission: foreignProof }, 's-2', foreignContent, runtime)
++await withAdmission(foreignReceipt, () => assertAppendAdmission('s-2' as never, 'agent/inbox/spliced', {
++  inserted: [{ content: foreignContent }],
++}))
++let foreignReceiptDenied = false
++try { assertAppendAdmission('s-3' as never, 'assistant/message', { content }) } catch (error) { foreignReceiptDenied = error instanceof AdmissionDeniedError }
++if (!foreignReceiptDenied) throw new Error('unrelated pending receipt accepted assistant injection')
++
++for (const invalid of [
++  { ...proof, admission_id: 'a-bad-time', issued_at: 'not-a-time' },
++  { ...proof, admission_id: 'a-expired', expires_at: new Date(1_500).toISOString() },
++  { ...proof, admission_id: 'a-window', expires_at: new Date(1_000 + 5 * 60_000 + 1).toISOString() },
++  { ...proof, admission_id: 'a-digest', content_digest: 'wrong' },
++  { ...proof, admission_id: 'a-signature', controller_signature: 'forged' },
++]) {
++  let denied = false
++  try { await requireAdmission({ admission: invalid }, 's-1', content, runtime) } catch (error) { denied = error instanceof AdmissionDeniedError }
++  if (!denied) throw new Error(`invalid proof accepted: ${invalid.admission_id}`)
++}
++
++let replayDenied = false
++try { await requireAdmission({ admission: proof }, 's-1', content, runtime) } catch (error) { replayDenied = error instanceof AdmissionDeniedError }
++if (!replayDenied) throw new Error('proof replay accepted')
++
++// Each closure invokes the installed upstream core guard, rather than merely
++// asserting a route label.  The three counters stand for the only effects a
++// producer is allowed to cause: a durable append, attachment/blob write, or
++// llm stream.  Invalid admission must stop every producer before all three.
++const effects = { seq: 0, blob: 0, model: 0 }
++const rawAppend = () => assertAppendAdmission('unadmitted' as never, 'agent/inbox/spliced', { inserted: [{ content }] })
++const rawUserAppend = () => assertAppendAdmission('unadmitted' as never, 'user/message', { content })
++const rawSeed = () => assertSeedAdmission('unadmitted' as never, [{ type: 'user/message' } as never])
++const rawModel = () => consumeModelAdmission('unadmitted' as never, [{ role: 'user', content }])
++const rawAssistantAppend = () => assertAppendAdmission('unadmitted' as never, 'assistant/message', { content })
++const rawAttachment = () => { rawAppend(); effects.blob++ }
++const rawImport = () => { rawSeed(); effects.seq++ }
++const rawResume = () => { rawSeed(); effects.seq++ }
++const rawFork = () => { rawSeed(); effects.seq++ }
++const rawSchedule = () => { rawAppend(); effects.seq++ }
++const rawBackground = () => { rawAppend(); effects.seq++ }
++const rawToolContext = () => { rawUserAppend(); effects.seq++ }
++const rawPlugin = () => { rawUserAppend(); effects.seq++ }
++const rawSubagent = () => { rawSeed(); effects.model++ }
++for (const producer of [
++  rawAppend, rawUserAppend, rawSeed, rawModel, rawAssistantAppend, rawAttachment, rawImport,
++  rawResume, rawFork, rawSchedule, rawBackground, rawToolContext, rawPlugin,
++  rawSubagent,
++]) {
++  let denied = false
++  try { producer() } catch (error) { denied = error instanceof AdmissionDeniedError || (error as { code?: unknown }).code === 'OPENDUCK_ADMISSION_REQUIRED' }
++  if (!denied || effects.seq !== 0 || effects.blob !== 0 || effects.model !== 0) {
++    throw new Error(`unadmitted producer reached an effect: ${producer.name}`)
++  }
++}
++
++console.log('WO-03 core admission PASS (signature, expiry, digest, one-use receipt, append, model gate)')
+diff -ruN '--exclude=node_modules' '--exclude=lib' '--exclude=dist' a/packages/host/apiproxy/src/api-proxy.ts b/packages/host/apiproxy/src/api-proxy.ts
+--- a/packages/host/apiproxy/src/api-proxy.ts	2026-08-19 20:25:44.621299725 +0300
++++ b/packages/host/apiproxy/src/api-proxy.ts	2026-08-19 20:22:30.227695313 +0300
+@@ -108,7 +108,7 @@
+   inspectApiRemoteSession,
+ } from '@deepseek-ai/dsh-api-remotes'
+ import { canOpenNativePath, openNativePath, openNativeTextFile } from './native-path-opener.ts'
+-import { AdmissionDeniedError, requireRequestAdmission, type AdmissionRuntime } from './openduck-ingress.ts'
++import { AdmissionDeniedError, requireAdmission, withAdmission, type AdmissionRuntime } from '@deepseek-ai/dsh-session'
+ 
+ /** Page size when history is called without maxMessages. */
+ const DEFAULT_MAX_MESSAGES = 50
+@@ -2305,15 +2305,6 @@
+ 
+       async fork(request) {
+         const { sessionId, atSeq } = request.payload
+-        try {
+-          await requireRequestAdmission(request.payload, sessionId, defaults.admission)
+-        } catch (error: unknown) {
+-          return err(request, {
+-            code: 'internal',
+-            message: error instanceof AdmissionDeniedError ? error.message : 'fork admission unavailable',
+-            details: { reason: 'OPENDUCK_ADMISSION_REQUIRED' },
+-          })
+-        }
+         let source: SessionReadState
+         try {
+           source = await readSessionState(sessionId)
+@@ -2372,7 +2363,8 @@
+         // plane, composing nothing would leave the child with no tools at all.
+         const forkComposition = await composeAgent(resolveSessionPreset(source))
+         try {
+-          await ctx.agents.create({
++          const receipt = await requireAdmission(request.payload, childId, events.slice(0, cut), defaults.admission)
++          await withAdmission(receipt, () => ctx.agents.create({
+             sessionId: childId,
+             seed: events.slice(0, cut),
+             meta: {
+@@ -2385,7 +2377,7 @@
+             },
+             agentOptions: agentOptions(),
+             setup: forkComposition.setup,
+-          })
++          }))
+         } catch (error: unknown) {
+           return err(request, {
+             code: 'internal',
+@@ -2415,8 +2407,9 @@
+         // This is intentionally before agent resolution, attachment writes,
+         // inbox mutation, and model dispatch. The default verifier denies all
+         // traffic until a Controller-backed composition is explicitly wired.
++        let receipt
+         try {
+-          await requireRequestAdmission(request.payload, sessionId, defaults.admission)
++          receipt = await requireAdmission(request.payload, sessionId, content, defaults.admission)
+         } catch (error: unknown) {
+           return err(request, {
+             code: 'internal',
+@@ -2459,8 +2452,10 @@
+             }
+             const durable = await durablePromptContent(ctx, content)
+             const message: UserMessage = createUserMessage({ content: durable, source })
+-            if (mode === 'steer') agent.steer(message)
+-            else agent.followup(message)
++            await withAdmission(receipt, () => {
++              if (mode === 'steer') agent.steer(message)
++              else agent.followup(message)
++            })
+           } catch (error: unknown) {
+             if (error instanceof AttachmentError) {
+               return err(request, {
+@@ -2533,15 +2528,6 @@
+         const { sessionId, itemId, action } = request.payload
+         // Queue edits/steer are another model-visible ingress and must not
+         // splice the inbox before Controller admission is consumed.
+-        try {
+-          await requireRequestAdmission(request.payload, sessionId, defaults.admission)
+-        } catch {
+-          return err(request, {
+-            code: 'internal',
+-            message: 'queue mutation admission unavailable',
+-            details: { reason: 'OPENDUCK_ADMISSION_REQUIRED' },
+-          })
+-        }
+         if (action.kind === 'edit' && action.content.some(block => block.type !== 'text')) {
+           return Promise.resolve(err(request, {
+             code: 'attachment-error',
+@@ -2581,11 +2567,23 @@
+             details: { itemId },
+           }))
+         }
+-        if (action.kind === 'edit') {
+-          agent.inbox.replace(itemId, freezeMessage({ ...message, content: action.content }))
+-        } else {
+-          agent.inbox.remove(itemId)
+-          if (action.kind === 'steer') agent.steer(message)
++        let receipt
++        try {
++          receipt = await requireAdmission(request.payload, sessionId, action.kind === 'edit' ? action.content : message.content, defaults.admission)
++          await withAdmission(receipt, () => {
++            if (action.kind === 'edit') {
++              agent.inbox.replace(itemId, freezeMessage({ ...message, content: action.content }))
++            } else {
++              agent.inbox.remove(itemId)
++              if (action.kind === 'steer') agent.steer(message)
++            }
++          })
++        } catch {
++          return err(request, {
++            code: 'internal',
++            message: 'queue mutation admission unavailable',
++            details: { reason: 'OPENDUCK_ADMISSION_REQUIRED' },
++          })
+         }
+         return Promise.resolve(ok(request, { accepted: true as const }))
+       },

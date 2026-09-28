@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "openduck-controller": {
+      "command": "python3",
+      "args": [
+        "scripts/controller_mcp.py"
+      ],
+      "cwd": "."
+    }
+  }
+}

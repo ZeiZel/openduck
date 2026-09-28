@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openduck.local/schemas/workspace-chat-binding.v1.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "chat_id", "group_id", "group_version", "group_digest", "signature"],
+  "properties": {
+    "schema_version": {"const": "workspace-chat-binding.v1"},
+    "chat_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$"},
+    "group_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,255}$"},
+    "group_version": {"type": "integer", "minimum": 1},
+    "group_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "signature": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

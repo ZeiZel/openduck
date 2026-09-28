@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${1:-}" == prepared ]] || exit 0
+while read -r old_sha new_sha ref; do
+  [[ -n "$ref" ]] || continue
+  [[ "$ref" == refs/remotes/* ]] && continue
+  # Fetch may auto-follow annotated or lightweight tags into the local ref namespace.
+  [[ "$ref" == refs/tags/* ]] && continue
+  # Git may create this transient merge state during an ordinary commit.
+  case "$ref" in
+    refs/AUTO_MERGE|AUTO_MERGE|HEAD|ORIG_HEAD|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD) continue ;;
+  esac
+  if [[ "$ref" == refs/heads/main ]]; then
+    [[ "$new_sha" != 0000000000000000000000000000000000000000 ]] || { printf 'main-only guard: deleting main is not allowed\n' >&2; exit 1; }
+    continue
+  fi
+  if [[ "$ref" == refs/heads/* && "$new_sha" == 0000000000000000000000000000000000000000 ]]; then
+    continue
+  fi
+  printf 'main-only guard: only main may be created or updated; remote-tracking refs are read-only inputs (got %s)\n' "$ref" >&2
+  exit 1
+done

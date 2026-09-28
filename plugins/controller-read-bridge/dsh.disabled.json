@@ -1,0 +1,7 @@
+{
+  "schema_version": "openduck-dsh-static-package.v1",
+  "package": "@openduck/controller-read-bridge",
+  "enabled": false,
+  "reason_code": "PROFILE_DISABLED",
+  "required_before_enable": ["native host registration", "independent browser security review"]
+}

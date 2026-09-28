@@ -1,0 +1,242 @@
+---
+# This role performs only unprivileged input projection. Cryptographic release
+# admission and nonce consumption belong to the trusted installer.
+- name: Resolve explicit release admission inputs
+  ansible.builtin.set_fact:
+    stage_effective_release_id: "{{ release_id | default(openduck_release_id | default(''), true) }}"
+    stage_effective_release_version: "{{ release_version | default(openduck_release_version | default(''), true) }}"
+    stage_effective_release_digest: "{{ release_digest | default(openduck_release_digest | default(''), true) }}"
+    stage_effective_release_run_id: "{{ release_run_id | default(openduck_release_run_id | default(''), true) }}"
+    stage_effective_release_operation: "{{ release_operation | default('deploy', true) }}"
+    # ``false`` is a signed intent, not an omitted value.  Do not let a
+    # legacy compatibility variable turn an explicit false into true.
+    stage_effective_release_activation_input: "{{ release_activation | default(openduck_activate | default(false)) }}"
+    stage_effective_release_envelope: "{{ release_envelope | default(openduck_release_envelope | default(''), true) }}"
+    stage_effective_release_manifest: "{{ release_manifest | default(openduck_release_manifest | default(''), true) }}"
+    stage_effective_release_trust_bundle: "{{ release_trust_bundle | default(openduck_release_trust_bundle | default(''), true) }}"
+    stage_effective_release_nonce_store: "{{ release_nonce_store | default(openduck_release_nonce_store | default(stage_release_nonce_store_path), true) }}"
+  become: false
+
+- name: Require explicit release admission inputs
+  ansible.builtin.assert:
+    that:
+      - stage_effective_release_id is string
+      - stage_effective_release_id is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')
+      - stage_effective_release_version is string
+      - stage_effective_release_version is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+      - stage_effective_release_digest is string
+      - stage_effective_release_digest is match('^[0-9a-f]{64}$')
+      - stage_effective_release_run_id is string
+      - stage_effective_release_run_id is match('^[0-9a-f-]{8,128}$')
+      - stage_effective_release_operation in ['deploy', 'rollback']
+      - >-
+        stage_effective_release_activation_input is boolean or
+        (stage_effective_release_activation_input is string and
+         stage_effective_release_activation_input in ['true', 'false'])
+      - stage_effective_release_envelope is string
+      - stage_effective_release_envelope is match('^/')
+      - stage_effective_release_manifest is string
+      - stage_effective_release_manifest is match('^/')
+      - stage_effective_release_trust_bundle is string
+      - stage_effective_release_trust_bundle is match('^/')
+      - stage_effective_release_nonce_store == stage_release_nonce_store_path
+    fail_msg: "release id/version/digest, envelope, manifest, trust bundle, and fixed nonce path are required"
+  become: false
+
+- name: Normalize explicit activation intent to a boolean
+  ansible.builtin.set_fact:
+    stage_effective_release_activation: "{{ stage_effective_release_activation_input | bool }}"
+  no_log: true
+  become: false
+
+- name: Inspect release admission inputs without following links
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+    get_checksum: false
+  loop:
+    - {name: envelope, path: "{{ stage_effective_release_envelope }}"}
+    - {name: manifest, path: "{{ stage_effective_release_manifest }}"}
+    - {name: trust_bundle, path: "{{ stage_effective_release_trust_bundle }}"}
+  loop_control:
+    label: "{{ item.name }}"
+  register: stage_release_input_stats
+  become: false
+  check_mode: false
+
+- name: Validate release admission input file shape
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk | default(false)
+      - (item.stat.nlink | default(1) | int) == 1
+      - (item.stat.size | int) > 1
+      - (item.stat.size | int) <= 1048576
+      - (item.stat.mode | default('0666')) is match('^[0-7]{3,4}$')
+      - (item.stat.mode | default('0666'))[-2:] not in ['02', '12', '22', '32', '42', '52', '62', '72']
+      - (item.stat.mode | default('0666'))[-1:] not in ['2', '3', '6', '7']
+    fail_msg: "release admission inputs must be bounded regular non-linked private files"
+  loop: "{{ stage_release_input_stats.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  become: false
+
+- name: Project release metadata without granting release authority
+  ansible.builtin.set_fact:
+    stage_release_projection: >-
+      {{ stage_effective_release_manifest | openduck_release_input_projection(
+        stage_effective_release_envelope,
+        stage_effective_release_trust_bundle,
+        staged_source,
+        stage_effective_release_id,
+        stage_effective_release_version,
+        stage_effective_release_digest,
+        stage_fixed_target_root,
+        ansible_system | lower,
+        ansible_architecture,
+        stage_effective_release_nonce_store,
+        stage_effective_release_operation,
+        stage_effective_release_run_id,
+        stage_effective_release_activation
+      ) }}
+  no_log: true
+  become: false
+
+- name: Require manifest v2 projection shape
+  ansible.builtin.assert:
+    that:
+      - stage_release_projection is mapping
+      - stage_release_projection.schema | default('') == 'openduck.release-manifest.v2'
+      - stage_release_projection.release_id == stage_effective_release_id
+      - stage_release_projection.release_version == stage_effective_release_version
+      - stage_release_projection.release_digest == stage_effective_release_digest
+      - stage_release_projection.operation == stage_effective_release_operation
+      - stage_release_projection.run_id == stage_effective_release_run_id
+      - stage_release_projection.activation == stage_effective_release_activation
+      - stage_release_projection.target_root == stage_fixed_target_root
+      - stage_release_projection.artifacts is sequence
+      - stage_release_projection.artifacts | length > 0
+      - stage_release_projection.artifacts | length <= 256
+    fail_msg: "release.manifest.v2 metadata does not match the explicit release binding"
+  no_log: true
+  become: false
+
+- name: Validate typed manifest artifact projection
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.type in stage_release_artifact_types
+      - item.path is string
+      - item.path is match('^[^/].*$')
+      - item.path == item.path | trim
+      - item.path is not match('(^|/)\\.\\.?(/|$)')
+      - item.digest is string
+      - item.digest is match('^[0-9a-f]{64}$')
+      - item.platform == ansible_system | lower
+      - item.arch == ansible_architecture
+      - item.version is string
+      - item.version is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+      - item.required is boolean
+      - item.activation_group is string
+    fail_msg: "manifest artifact projection contains an unsafe or unsupported typed target"
+  loop: "{{ stage_release_projection.artifacts }}"
+  loop_control:
+    label: "{{ item.path | default('unknown') }}"
+  no_log: true
+  become: false
+
+- name: Reject duplicate manifest targets
+  ansible.builtin.assert:
+    that:
+      - (stage_release_projection.artifacts | map(attribute='path') | list | unique | length) == (stage_release_projection.artifacts | length)
+    fail_msg: "release.manifest.v2 contains duplicate artifact targets"
+  no_log: true
+  become: false
+
+- name: Require typed helpers at their canonical targets
+  ansible.builtin.assert:
+    that:
+      - >-
+        (stage_release_projection.artifacts |
+         selectattr('type', 'equalto', 'helper') |
+         selectattr('path', 'equalto', 'bin/openduck-installer') |
+         list | length) == 1
+      - >-
+        (stage_release_projection.artifacts |
+         selectattr('type', 'equalto', 'helper') |
+         selectattr('path', 'equalto', 'bin/openduck-readiness') |
+         list | length) == 1
+    fail_msg: "release.manifest.v2 must contain exactly one typed installer and readiness helper"
+  no_log: true
+  become: false
+
+- name: Build role-scoped canonical release contract for downstream play adapters
+  ansible.builtin.set_fact:
+    stage_release_id: "{{ stage_effective_release_id }}"
+    stage_release_version: "{{ stage_effective_release_version }}"
+    stage_release_digest: "{{ stage_effective_release_digest }}"
+    stage_release_run_id: "{{ stage_effective_release_run_id }}"
+    stage_release_operation: "{{ stage_effective_release_operation }}"
+    stage_release_activation: "{{ stage_effective_release_activation }}"
+    stage_activate: "{{ stage_effective_release_activation }}"
+    stage_release_envelope: "{{ stage_effective_release_envelope }}"
+    stage_release_manifest: "{{ stage_effective_release_manifest }}"
+    stage_release_trust_bundle: "{{ stage_effective_release_trust_bundle }}"
+    stage_release_nonce_store: "{{ stage_effective_release_nonce_store }}"
+    stage_release_envelope_path: "{{ stage_effective_release_envelope }}"
+    stage_release_manifest_path: "{{ stage_effective_release_manifest }}"
+    stage_release_trust_bundle_path: "{{ stage_effective_release_trust_bundle }}"
+    stage_release_nonce_store_path: "{{ stage_effective_release_nonce_store }}"
+    stage_release_artifacts: "{{ stage_release_projection.artifacts }}"
+    stage_artifact_set_digest: "{{ stage_release_projection.artifact_set_digest }}"
+    stage_canonical_artifact_set_digest: "{{ stage_release_projection.artifact_set_digest }}"
+    stage_artifacts_validated: true
+  no_log: true
+  become: false
+
+- name: Inspect staged source without following links
+  ansible.builtin.stat:
+    path: "{{ staged_source }}"
+    follow: false
+  register: stage_source_stat
+  become: false
+  check_mode: false
+
+- name: Validate staged source boundary
+  ansible.builtin.assert:
+    that:
+      - staged_source is string
+      - staged_source is match('^/')
+      - stage_source_stat.stat.exists
+      - stage_source_stat.stat.isdir
+      - not stage_source_stat.stat.islnk | default(false)
+    fail_msg: "staged_source must be an existing absolute non-symlink directory"
+  become: false
+
+- name: Inspect every projected staged artifact without following links
+  ansible.builtin.stat:
+    path: "{{ staged_source }}/{{ item.path }}"
+    follow: false
+    checksum_algorithm: sha256
+  loop: "{{ stage_release_artifacts }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: stage_projected_artifact_stats
+  become: false
+  check_mode: false
+
+- name: Validate projected staged artifact shape
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk | default(false)
+      - (item.stat.nlink | default(1) | int) == 1
+      - (item.stat.size | int) <= 67108864
+    fail_msg: "projected staged artifact has invalid type, size, or link count"
+  loop: "{{ stage_projected_artifact_stats.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  no_log: true
+  become: false

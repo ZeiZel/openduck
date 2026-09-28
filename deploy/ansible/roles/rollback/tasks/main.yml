@@ -1,0 +1,269 @@
+---
+- name: Initialize rollback cleanup state
+  ansible.builtin.set_fact:
+    rollback_primary_failed: false
+    rollback_cleanup_failed: false
+  no_log: true
+  become: false
+
+- name: Inspect pending rollback target without following links
+  ansible.builtin.stat:
+    path: "/Library/Application Support/OpenDuck/pending.rollback"
+    follow: false
+  register: rollback_pending_stat
+  check_mode: false
+  when: rollback_requested | bool
+  become: true
+
+- name: Inspect previous release without following links
+  ansible.builtin.stat:
+    path: "/Library/Application Support/OpenDuck/previous.release"
+    follow: false
+  register: rollback_previous_release_stat
+  check_mode: false
+  when: rollback_requested | bool
+  become: true
+
+- name: Select a regular rollback target for the trusted helper
+  ansible.builtin.set_fact:
+    rollback_target_present: >-
+      {{ (rollback_pending_stat.stat.isreg | default(false) and
+          not (rollback_pending_stat.stat.islnk | default(false))) or
+         (rollback_previous_release_stat.stat.isreg | default(false) and
+          not (rollback_previous_release_stat.stat.islnk | default(false))) }}
+  when: rollback_requested | bool
+  become: false
+
+- name: Report rollback unavailable on first install
+  ansible.builtin.debug:
+    msg: "rollback unavailable: previous.release is absent; leaving the failed first install fail-closed"
+  when:
+    - rollback_requested | bool
+    - not rollback_target_present | default(false) | bool
+  become: false
+
+- name: Record unavailable rollback state without attempting a helper
+  ansible.builtin.set_fact:
+    rollback_unavailable: true
+    rollback_performed: false
+    rollback_failed: false
+  when:
+    - rollback_requested | bool
+    - not rollback_target_present | default(false) | bool
+  become: false
+
+- name: Roll back to the fixed previous release
+  when:
+    - rollback_requested | bool
+    - rollback_target_present | default(false) | bool
+  block:
+    - name: Inspect random rollback handoff before helper copy
+      ansible.builtin.stat:
+        path: "{{ rollback_run_handoff.path }}"
+        follow: false
+      register: rollback_run_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require intact root-owned random rollback handoff
+      ansible.builtin.assert:
+        that:
+          - rollback_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+          - rollback_run_dir_stat.stat.isdir | default(false)
+          - not (rollback_run_dir_stat.stat.islnk | default(false))
+          - (rollback_run_dir_stat.stat.uid | default(-1) | int) == 0
+          - (rollback_run_dir_stat.stat.gid | default(-1) | int) == 0
+          - rollback_run_dir_stat.stat.gr_name | default('') == 'wheel'
+          - rollback_run_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+
+    - name: Copy rollback helper to fixed per-run path
+      ansible.builtin.copy:
+        src: "{{ trusted_helper_path }}"
+        dest: "{{ rollback_run_handoff.path }}/rollback-installer"
+        remote_src: true
+        owner: root
+        group: wheel
+        mode: '0700'
+      no_log: true
+      become: true
+
+    - name: Hash-check rollback helper copy
+      ansible.builtin.stat:
+        path: "{{ rollback_run_handoff.path }}/rollback-installer"
+        follow: false
+        checksum_algorithm: sha256
+      register: rollback_helper_stat
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Assert rollback helper hash parity
+      ansible.builtin.assert:
+        that:
+          - rollback_helper_stat.stat.isreg | default(false)
+          - not (rollback_helper_stat.stat.islnk | default(false))
+          - (rollback_helper_stat.stat.nlink | default(0) | int) == 1
+          - rollback_helper_stat.stat.mode | default('') == '0700'
+          - rollback_helper_stat.stat.checksum == trusted_helper_digest
+      no_log: true
+      become: false
+
+    - name: Recheck random rollback handoff before helper execution
+      ansible.builtin.stat:
+        path: "{{ rollback_run_handoff.path }}"
+        follow: false
+      register: rollback_exec_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require intact random rollback handoff before helper execution
+      ansible.builtin.assert:
+        that:
+          - rollback_exec_dir_stat.stat.isdir | default(false)
+          - not (rollback_exec_dir_stat.stat.islnk | default(false))
+          - (rollback_exec_dir_stat.stat.uid | default(-1) | int) == 0
+          - (rollback_exec_dir_stat.stat.gid | default(-1) | int) == 0
+          - rollback_exec_dir_stat.stat.gr_name | default('') == 'wheel'
+          - rollback_exec_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+
+    - name: Invoke literal rollback without reactivation
+      ansible.builtin.command:
+        argv:
+          - "{{ rollback_run_handoff.path }}/rollback-installer"
+          - --rollback
+          - --error-json-file
+          - "{{ rollback_run_handoff.path }}/helper-error.json"
+          - --release-id
+          - "{{ release_id }}"
+          - --release-version
+          - "{{ release_version }}"
+          - --release-digest
+          - "{{ release_digest }}"
+          - --release-envelope
+          - "{{ release_envelope }}"
+          - --release-manifest
+          - "{{ release_manifest }}"
+          - --release-trust-bundle
+          - "{{ release_trust_bundle }}"
+          - --release-nonce-store
+          - "{{ openduck_release_nonce_store_path }}"
+          - --run-id
+          - "{{ rollback_effective_run_id }}"
+          - --binary-dir
+          - "{{ staged_source }}"
+      register: rollback_result
+      changed_when: true
+      no_log: true
+      become: true
+    - name: Record rollback outcome
+      ansible.builtin.set_fact:
+        rollback_performed: true
+      become: false
+  rescue:
+    - name: Preserve primary failure before parsing rollback failure
+      ansible.builtin.set_fact:
+        rollback_primary_helper_error: "{{ diagnostics_helper_error | default({}) }}"
+      no_log: true
+      become: false
+    - name: Sanitize rollback helper failure
+      ansible.builtin.include_tasks: ../../diagnostics/tasks/sanitize_helper_error.yml
+      vars:
+        diagnostics_effective_run_id: "{{ rollback_effective_run_id }}"
+        diagnostics_helper_phase: rollback
+        diagnostics_run_dir: "{{ rollback_run_handoff.path }}"
+        diagnostics_helper_error_path: "{{ rollback_run_handoff.path }}/helper-error.json"
+    - name: Store rollback failure separately from the primary failure
+      ansible.builtin.set_fact:
+        rollback_error: "{{ diagnostics_helper_error }}"
+        rollback_diagnostics_helper_error: "{{ rollback_primary_helper_error if rollback_primary_helper_error | length > 0 else diagnostics_helper_error }}"
+      no_log: true
+      become: false
+    - name: Preserve rollback failure for diagnostics
+      ansible.builtin.set_fact:
+        rollback_failed: true
+        rollback_primary_failed: true
+      become: false
+- name: Recheck random rollback handoff before cleanup
+  ansible.builtin.stat:
+    path: "{{ rollback_run_handoff.path | default('') }}"
+    follow: false
+  register: rollback_cleanup_dir_stat
+  changed_when: false
+  check_mode: false
+  no_log: true
+  become: true
+  when:
+    - rollback_requested | bool
+    - rollback_run_handoff.path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+    - "'..' not in (rollback_run_handoff.path | default(''))"
+
+- name: Require intact random rollback handoff before cleanup
+  ansible.builtin.assert:
+    that:
+      - rollback_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+      - "'..' not in rollback_run_handoff.path"
+      - rollback_cleanup_dir_stat.stat.isdir | default(false)
+      - not (rollback_cleanup_dir_stat.stat.islnk | default(false))
+      - (rollback_cleanup_dir_stat.stat.uid | default(-1) | int) == 0
+      - (rollback_cleanup_dir_stat.stat.gid | default(-1) | int) == 0
+      - rollback_cleanup_dir_stat.stat.gr_name | default('') == 'wheel'
+      - rollback_cleanup_dir_stat.stat.mode | default('') == '0700'
+  failed_when: false
+  no_log: true
+  become: false
+  when:
+    - rollback_requested | bool
+    - rollback_run_handoff.path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+    - "'..' not in (rollback_run_handoff.path | default(''))"
+
+- name: Remove only validated random rollback handoff on every rollback outcome
+  ansible.builtin.file:
+    path: "{{ rollback_run_handoff.path | default('') }}"
+    state: absent
+  register: rollback_cleanup_result
+  failed_when: false
+  no_log: true
+  become: true
+  when:
+    - rollback_requested | bool
+    - rollback_run_handoff.path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+    - "'..' not in (rollback_run_handoff.path | default(''))"
+    - rollback_cleanup_dir_stat.stat.isdir | default(false)
+    - not (rollback_cleanup_dir_stat.stat.islnk | default(false))
+    - (rollback_cleanup_dir_stat.stat.uid | default(-1) | int) == 0
+    - (rollback_cleanup_dir_stat.stat.gid | default(-1) | int) == 0
+    - rollback_cleanup_dir_stat.stat.gr_name | default('') == 'wheel'
+    - rollback_cleanup_dir_stat.stat.mode | default('') == '0700'
+
+- name: Preserve rollback cleanup result
+  ansible.builtin.set_fact:
+    rollback_cleanup_failed: >-
+      {{ (rollback_cleanup_result.failed | default(false) | bool) or
+         ((rollback_requested | bool) and
+          (rollback_cleanup_result is skipped)) }}
+  no_log: true
+  become: false
+
+- name: Fail closed while preserving rollback primary failure
+  ansible.builtin.fail:
+    msg: "OpenDuck rollback transaction failed"
+  when: rollback_primary_failed | bool
+  no_log: true
+  become: false
+
+- name: Fail closed on rollback cleanup failure after recording primary outcome
+  ansible.builtin.fail:
+    msg: "OpenDuck rollback handoff cleanup failed"
+  when:
+    - not rollback_primary_failed | bool
+    - rollback_cleanup_failed | bool
+  no_log: true
+  become: false

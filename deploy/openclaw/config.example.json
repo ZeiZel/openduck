@@ -1,0 +1,22 @@
+{
+  "gateway": {
+    "mode": "local",
+    "bind": "loopback",
+    "port": 18789,
+    "auth": { "mode": "token", "token": { "source": "env", "id": "OPENCLAW_GATEWAY_TOKEN" } }
+  },
+  "runtime": {
+    "workspace": "${OPENDUCK_WORKSPACE}",
+    "stateDirectory": "${OPENDUCK_STATE_DIR}"
+  },
+  "corporateSources": {
+    "enabled": false,
+    "chatLabel": "Enterprise Chat",
+    "taskTracker": { "enabled": false, "workspace": "" }
+  },
+  "cua": {
+    "enabled": false,
+    "driverPath": "",
+    "allowedBundles": []
+  }
+}

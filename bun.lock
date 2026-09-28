@@ -1,0 +1,30 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "openduck",
+    },
+    "plugins/beads-memory-explorer": {
+      "name": "@openduck/beads-memory-explorer",
+    },
+    "plugins/controller-read-bridge": {
+      "name": "@openduck/controller-read-bridge",
+    },
+    "plugins/multi-provider-mesh": {
+      "name": "@openduck/multi-provider-mesh",
+    },
+    "plugins/workspace-groups": {
+      "name": "@openduck/workspace-groups",
+    },
+  },
+  "packages": {
+    "@openduck/beads-memory-explorer": ["@openduck/beads-memory-explorer@workspace:plugins/beads-memory-explorer"],
+
+    "@openduck/controller-read-bridge": ["@openduck/controller-read-bridge@workspace:plugins/controller-read-bridge"],
+
+    "@openduck/multi-provider-mesh": ["@openduck/multi-provider-mesh@workspace:plugins/multi-provider-mesh"],
+
+    "@openduck/workspace-groups": ["@openduck/workspace-groups@workspace:plugins/workspace-groups"],
+  }
+}

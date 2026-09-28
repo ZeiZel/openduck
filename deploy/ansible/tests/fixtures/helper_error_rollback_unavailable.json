@@ -1,0 +1,12 @@
+{
+  "schema": "openduck.provisioning-error.v2",
+  "version": 2,
+  "run_id": "aaaaaaaa-1111",
+  "release_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "phase": "activate",
+  "reason_code": "rollback_absent",
+  "primary_reason_code": "rollback_absent",
+  "compensation_reason_code": "",
+  "scope": "installer",
+  "recovery_state": "rollback_unavailable"
+}

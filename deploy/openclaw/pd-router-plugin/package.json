@@ -1,0 +1,8 @@
+{
+  "name": "openduck-pd-router",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "index.mjs",
+  "openclaw": { "extensions": ["./index.mjs"], "compat": { "pluginApi": ">=2026.7.1" } }
+}

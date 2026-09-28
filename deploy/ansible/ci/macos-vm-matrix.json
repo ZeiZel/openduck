@@ -1,0 +1,21 @@
+{
+  "schema": "openduck.ansible.macos-vm-matrix.v1",
+  "platform": "macos",
+  "architectures": ["arm64"],
+  "disposable": true,
+  "scenarios": [
+    {"name": "fresh", "artifacts": "artifacts/fresh", "receipt": "receipts/fresh.json"},
+    {"name": "idempotent", "artifacts": "artifacts/idempotent", "receipt": "receipts/idempotent.json"},
+    {"name": "upgrade", "artifacts": "artifacts/upgrade", "receipt": "receipts/upgrade.json"},
+    {"name": "injected_failure", "artifacts": "artifacts/injected-failure", "receipt": "receipts/injected-failure.json"},
+    {"name": "rollback", "artifacts": "artifacts/rollback", "receipt": "receipts/rollback.json"},
+    {"name": "retry", "artifacts": "artifacts/retry", "receipt": "receipts/retry.json"},
+    {"name": "concurrent", "artifacts": "artifacts/concurrent", "receipt": "receipts/concurrent.json"},
+    {"name": "two_daemon_inactive_contract", "artifacts": "artifacts/two-daemon-inactive", "receipt": "receipts/two-daemon-inactive.json"},
+    {"name": "provider_attestor_restart_substitution_rollback", "artifacts": "artifacts/provider-attestor-faults", "receipt": "receipts/provider-attestor-faults.json"}
+  ],
+  "intel": {
+    "status": "decision_required",
+    "reason": "Intel support requires an explicit operations-owner decision and the same disposable VM suite"
+  }
+}

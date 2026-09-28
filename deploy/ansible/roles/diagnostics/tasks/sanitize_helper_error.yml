@@ -1,0 +1,153 @@
+---
+- name: Initialize sanitized helper failure fallback
+  ansible.builtin.set_fact:
+    diagnostics_helper_error:
+      schema: openduck.provisioning-error.v2
+      version: 2
+      run_id: "{{ diagnostics_effective_run_id | default('') }}"
+      release_digest: "{{ release_digest }}"
+      phase: "{{ diagnostics_helper_phase | default('unknown') }}"
+      reason_code: helper_failed_unclassified
+      primary_reason_code: helper_failed_unclassified
+      compensation_reason_code: ''
+      scope: unknown
+      recovery_state: unknown
+  no_log: true
+  become: false
+
+- name: Define bounded provisioning error reason allowlist
+  ansible.builtin.set_fact:
+    diagnostics_error_reason_codes:
+      - pf_rules_invalid
+      - pf_load_failed
+      - pf_restore_failed
+      - launchd_enable_failed
+      - launchd_bootstrap_failed
+      - launchd_kickstart_failed
+      - launchd_health_failed
+      - launchd_shutdown_failed
+      - rollback_absent
+      - rollback_unverified
+      - rollback_plist_unavailable
+      - rollback_restore_failed
+      - policy_upgrade_failed
+      - apply_restore_failed
+      - stop_required
+      - verification_failed
+      - provisioning_failed
+  no_log: true
+  become: false
+
+- name: Inspect random invocation handoff before reading helper error
+  ansible.builtin.stat:
+    path: "{{ diagnostics_run_dir | default('') }}"
+    follow: false
+  register: diagnostics_helper_error_dir_stat
+  changed_when: false
+  no_log: true
+  become: true
+  when:
+    - diagnostics_run_dir | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+    - "'..' not in (diagnostics_run_dir | default(''))"
+
+- name: Inspect designated helper error file without following links
+  ansible.builtin.stat:
+    path: "{{ diagnostics_helper_error_path | default('') }}"
+    follow: false
+  register: diagnostics_helper_error_stat
+  changed_when: false
+  no_log: true
+  become: true
+  when:
+    - diagnostics_helper_error_path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}/helper-error\\.json$')
+    - diagnostics_helper_error_path == diagnostics_run_dir ~ '/helper-error.json'
+    - diagnostics_helper_error_dir_stat.stat.isdir | default(false)
+    - not (diagnostics_helper_error_dir_stat.stat.islnk | default(false))
+    - (diagnostics_helper_error_dir_stat.stat.uid | default(-1) | int) == 0
+    - (diagnostics_helper_error_dir_stat.stat.gid | default(-1) | int) == 0
+    - diagnostics_helper_error_dir_stat.stat.gr_name | default('') == 'wheel'
+    - diagnostics_helper_error_dir_stat.stat.mode | default('') == '0700'
+
+- name: Require bounded root-owned helper error file before reading
+  ansible.builtin.assert:
+    that:
+      - diagnostics_helper_error_stat.stat.exists | default(false)
+      - diagnostics_helper_error_stat.stat.isreg | default(false)
+      - not (diagnostics_helper_error_stat.stat.islnk | default(true))
+      - (diagnostics_helper_error_stat.stat.nlink | default(0) | int) == 1
+      - (diagnostics_helper_error_stat.stat.uid | default(-1) | int) == 0
+      - (diagnostics_helper_error_stat.stat.gid | default(-1) | int) == 0
+      - diagnostics_helper_error_stat.stat.gr_name | default('') == 'wheel'
+      - diagnostics_helper_error_stat.stat.mode | default('') == '0600'
+      - (diagnostics_helper_error_stat.stat.size | default(4097) | int) > 1
+      - (diagnostics_helper_error_stat.stat.size | default(4097) | int) <= 4096
+  failed_when: false
+  no_log: true
+  become: false
+
+- name: Read only an exact bounded designated helper error channel
+  ansible.builtin.slurp:
+    src: "{{ diagnostics_helper_error_path }}"
+  register: diagnostics_helper_error_file
+  changed_when: false
+  no_log: true
+  become: true
+  when:
+    - diagnostics_helper_error_stat.stat.exists | default(false)
+    - diagnostics_helper_error_stat.stat.isreg | default(false)
+    - not (diagnostics_helper_error_stat.stat.islnk | default(true))
+    - (diagnostics_helper_error_stat.stat.nlink | default(0) | int) == 1
+    - (diagnostics_helper_error_stat.stat.uid | default(-1) | int) == 0
+    - (diagnostics_helper_error_stat.stat.gid | default(-1) | int) == 0
+    - diagnostics_helper_error_stat.stat.gr_name | default('') == 'wheel'
+    - diagnostics_helper_error_stat.stat.mode | default('') == '0600'
+    - (diagnostics_helper_error_stat.stat.size | default(4097) | int) > 1
+    - (diagnostics_helper_error_stat.stat.size | default(4097) | int) <= 4096
+
+- name: Decode only bounded v2 JSON from the designated helper error channel
+  ansible.builtin.set_fact:
+    diagnostics_helper_error_candidate: "{{ (diagnostics_helper_error_file.content | default('') | b64decode) | openduck_safe_error_json }}"
+  no_log: true
+  become: false
+
+- name: Compute contract validity without failing the play
+  ansible.builtin.set_fact:
+    diagnostics_helper_error_valid: >-
+      {{ diagnostics_helper_error_candidate is mapping and
+         (diagnostics_helper_error_candidate.keys() | list | sort) ==
+         (['schema', 'version', 'run_id', 'release_digest', 'phase',
+           'reason_code', 'primary_reason_code', 'compensation_reason_code',
+           'scope', 'recovery_state'] | sort) and
+         diagnostics_helper_error_candidate.schema | default('') == 'openduck.provisioning-error.v2' and
+         diagnostics_helper_error_candidate.version is integer and
+         diagnostics_helper_error_candidate.version == 2 and
+         diagnostics_helper_error_candidate.run_id | default('') == diagnostics_effective_run_id | default('') and
+         diagnostics_helper_error_candidate.release_digest | default('') == release_digest and
+         diagnostics_helper_error_candidate.phase | default('') in ['deploy', 'activate', 'rollback', 'verify', 'plan', 'finalize'] and
+         diagnostics_helper_error_candidate.reason_code | default('') in diagnostics_error_reason_codes and
+         diagnostics_helper_error_candidate.primary_reason_code == diagnostics_helper_error_candidate.reason_code and
+         (diagnostics_helper_error_candidate.compensation_reason_code | default('')) in
+         ([''] + diagnostics_error_reason_codes) and
+         ((diagnostics_helper_error_candidate.compensation_reason_code | default('')) == '' or
+          diagnostics_helper_error_candidate.recovery_state == 'manual_review') and
+         diagnostics_helper_error_candidate.scope | default('') == 'installer' and
+         diagnostics_helper_error_candidate.recovery_state | default('') in ['retry_safe', 'manual_review', 'rollback_unavailable'] }}
+  no_log: true
+  become: false
+
+- name: Retain only a validated helper error projection
+  ansible.builtin.set_fact:
+    diagnostics_helper_error:
+      schema: openduck.provisioning-error.v2
+      version: 2
+      run_id: "{{ diagnostics_helper_error_candidate.run_id }}"
+      release_digest: "{{ diagnostics_helper_error_candidate.release_digest }}"
+      phase: "{{ diagnostics_helper_error_candidate.phase }}"
+      reason_code: "{{ diagnostics_helper_error_candidate.reason_code }}"
+      primary_reason_code: "{{ diagnostics_helper_error_candidate.primary_reason_code }}"
+      compensation_reason_code: "{{ diagnostics_helper_error_candidate.compensation_reason_code }}"
+      scope: "{{ diagnostics_helper_error_candidate.scope }}"
+      recovery_state: "{{ diagnostics_helper_error_candidate.recovery_state }}"
+  when: diagnostics_helper_error_valid | default(false) | bool
+  no_log: true
+  become: false

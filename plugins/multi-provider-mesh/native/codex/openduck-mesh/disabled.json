@@ -1,0 +1,6 @@
+{
+  "schema_version": "openduck-native-fixture-policy.v1",
+  "installation_status": "not_installed",
+  "runtime_status": "disabled",
+  "reason_code": "CONTROLLER_NATIVE_TRANSPORT_UNAVAILABLE"
+}

@@ -1,0 +1,351 @@
+---
+# The check-mode PlanV2 handoff is root-created with O_EXCL semantics.  A
+# run-id is an admission value, not a uniqueness guarantee; never derive a
+# reusable pathname from it.
+- name: Initialize PlanV2 failure state
+  ansible.builtin.set_fact:
+    atomic_commit_plan_primary_failure: ""
+    atomic_commit_plan_cleanup_failed: false
+    atomic_commit_plan_dir_transferred: false
+  no_log: true
+  become: false
+
+- name: Create seal transfer and run random PlanV2 handoff
+  block:
+    - name: Create random root-owned PlanV2 handoff directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /private/var/run
+        prefix: openduck-plan-
+      register: atomic_commit_plan_tempdir
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Bind returned PlanV2 handoff paths
+      ansible.builtin.set_fact:
+        atomic_commit_plan_dir: "{{ atomic_commit_plan_tempdir.path }}"
+        atomic_commit_plan_helper_path: "{{ atomic_commit_plan_tempdir.path }}/plan-installer"
+      no_log: true
+      become: false
+
+    - name: Validate random PlanV2 handoff path and non-root invoking user
+      ansible.builtin.assert:
+        that:
+          - ansible_user_uid | int != 0
+          - atomic_commit_plan_dir is match('^/private/var/run/openduck-plan-[a-z0-9_]{6,128}$')
+          - atomic_commit_plan_helper_path == atomic_commit_plan_dir ~ '/plan-installer'
+          - "'..' not in atomic_commit_plan_dir"
+      no_log: true
+      become: false
+
+    - name: Stat newly created PlanV2 handoff without following links
+      ansible.builtin.stat:
+        path: "{{ atomic_commit_plan_dir }}"
+        follow: false
+      register: atomic_commit_plan_dir_root_stat
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require newly created root-owned PlanV2 handoff metadata
+      ansible.builtin.assert:
+        that:
+          - atomic_commit_plan_dir_root_stat.stat.isdir | default(false)
+          - not (atomic_commit_plan_dir_root_stat.stat.islnk | default(false))
+          - (atomic_commit_plan_dir_root_stat.stat.uid | default(-1) | int) == 0
+          - (atomic_commit_plan_dir_root_stat.stat.gid | default(-1) | int) == 0
+          - atomic_commit_plan_dir_root_stat.stat.gr_name | default('') == 'wheel'
+          - atomic_commit_plan_dir_root_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+
+    - name: Copy selected trusted helper into root-owned PlanV2 handoff
+      ansible.builtin.copy:
+        src: "{{ trusted_helper_path }}"
+        dest: "{{ atomic_commit_plan_helper_path }}"
+        remote_src: true
+        owner: root
+        group: wheel
+        mode: '0700'
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Stat sealed PlanV2 helper without following links
+      ansible.builtin.stat:
+        path: "{{ atomic_commit_plan_helper_path }}"
+        follow: false
+        checksum_algorithm: sha256
+      register: atomic_commit_plan_helper_root_stat
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require sealed root-owned PlanV2 helper metadata digest and inode
+      ansible.builtin.assert:
+        that:
+          - atomic_commit_plan_helper_root_stat.stat.isreg | default(false)
+          - not (atomic_commit_plan_helper_root_stat.stat.islnk | default(false))
+          - (atomic_commit_plan_helper_root_stat.stat.nlink | default(0) | int) == 1
+          - (atomic_commit_plan_helper_root_stat.stat.uid | default(-1) | int) == 0
+          - (atomic_commit_plan_helper_root_stat.stat.gid | default(-1) | int) == 0
+          - atomic_commit_plan_helper_root_stat.stat.gr_name | default('') == 'wheel'
+          - atomic_commit_plan_helper_root_stat.stat.mode | default('') == '0700'
+          - atomic_commit_plan_helper_root_stat.stat.checksum == trusted_helper_digest
+          - (atomic_commit_plan_helper_root_stat.stat.inode | default(0) | int) > 0
+      no_log: true
+      become: false
+
+    # No root stats/writes occur after these exact, non-recursive transfers.
+    - name: Transfer sealed PlanV2 helper ownership exactly once
+      ansible.builtin.file:
+        path: "{{ atomic_commit_plan_helper_path }}"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_gid }}"
+        mode: '0700'
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Transfer PlanV2 directory ownership exactly once
+      ansible.builtin.file:
+        path: "{{ atomic_commit_plan_dir }}"
+        state: directory
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_gid }}"
+        mode: '0700'
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Record completed PlanV2 directory ownership transfer
+      ansible.builtin.set_fact:
+        atomic_commit_plan_dir_transferred: true
+      no_log: true
+      become: false
+
+    - name: Restat transferred PlanV2 directory and helper as invoking user
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        follow: false
+        checksum_algorithm: sha256
+      loop:
+        - "{{ atomic_commit_plan_dir }}"
+        - "{{ atomic_commit_plan_helper_path }}"
+      register: atomic_commit_plan_user_stats
+      check_mode: false
+      no_log: true
+      become: false
+
+    - name: Require transferred PlanV2 directory helper ownership and identity
+      ansible.builtin.assert:
+        that:
+          - atomic_commit_plan_user_stats.results | length == 2
+          - atomic_commit_plan_user_stats.results[0].stat.isdir | default(false)
+          - not (atomic_commit_plan_user_stats.results[0].stat.islnk | default(false))
+          - (atomic_commit_plan_user_stats.results[0].stat.uid | default(-1) | int) == (ansible_user_uid | int)
+          - (atomic_commit_plan_user_stats.results[0].stat.gid | default(-1) | int) == (ansible_user_gid | int)
+          - atomic_commit_plan_user_stats.results[0].stat.mode | default('') == '0700'
+          - atomic_commit_plan_user_stats.results[1].stat.isreg | default(false)
+          - not (atomic_commit_plan_user_stats.results[1].stat.islnk | default(false))
+          - (atomic_commit_plan_user_stats.results[1].stat.nlink | default(0) | int) == 1
+          - (atomic_commit_plan_user_stats.results[1].stat.uid | default(-1) | int) == (ansible_user_uid | int)
+          - (atomic_commit_plan_user_stats.results[1].stat.gid | default(-1) | int) == (ansible_user_gid | int)
+          - atomic_commit_plan_user_stats.results[1].stat.mode | default('') == '0700'
+          - atomic_commit_plan_user_stats.results[1].stat.checksum == trusted_helper_digest
+          - atomic_commit_plan_user_stats.results[1].stat.inode == atomic_commit_plan_helper_root_stat.stat.inode
+      no_log: true
+      become: false
+
+    - name: Run pure admitted PlanV2 operation from unprivileged handoff
+      ansible.builtin.command:
+        argv:
+          - "{{ atomic_commit_plan_helper_path }}"
+          - --plan-json
+          - "--activation={{ 'true' if (openduck_activate | bool) else 'false' }}"
+          - --release-id
+          - "{{ release_id }}"
+          - --release-version
+          - "{{ release_version }}"
+          - --release-digest
+          - "{{ release_digest }}"
+          - --run-id
+          - "{{ release_run_id }}"
+          - --binary-dir
+          - "{{ staged_source }}"
+          - --release-envelope
+          - "{{ release_envelope }}"
+          - --release-manifest
+          - "{{ release_manifest }}"
+          - --release-trust-bundle
+          - "{{ release_trust_bundle }}"
+          - --release-nonce-store
+          - "{{ openduck_release_nonce_store_path }}"
+      register: atomic_commit_plan_result
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: false
+
+    - name: Validate exact bounded PlanV2 projection
+      ansible.builtin.set_fact:
+        atomic_commit_deployment_plan: "{{ atomic_commit_plan_result.stdout | openduck_deployment_plan_v2(openduck_release_projection) }}"
+      no_log: true
+      become: false
+  rescue:
+    - name: Preserve bounded primary PlanV2 failure category
+      ansible.builtin.set_fact:
+        atomic_commit_plan_primary_failure: plan_handoff_or_projection_failed
+      no_log: true
+      become: false
+  always:
+    # Before ownership transfer only root can remove the sealed handoff. Once
+    # transferred, cleanup deliberately runs as the invoking user so that no
+    # privileged write follows the user-visible handoff boundary.
+    - name: Restat root-owned PlanV2 handoff before pre-transfer cleanup
+      ansible.builtin.stat:
+        path: "{{ atomic_commit_plan_dir | default('') }}"
+        follow: false
+      register: atomic_commit_plan_pretransfer_cleanup_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+      when:
+        - not (atomic_commit_plan_dir_transferred | default(false) | bool)
+        - atomic_commit_plan_dir | default('') is match('^/private/var/run/openduck-plan-[a-z0-9_]{6,128}$')
+        - "'..' not in (atomic_commit_plan_dir | default(''))"
+
+    - name: Require intact root-owned PlanV2 handoff before pre-transfer cleanup
+      ansible.builtin.assert:
+        that:
+          - atomic_commit_plan_pretransfer_cleanup_stat.stat.isdir | default(false)
+          - not (atomic_commit_plan_pretransfer_cleanup_stat.stat.islnk | default(false))
+          - (atomic_commit_plan_pretransfer_cleanup_stat.stat.uid | default(-1) | int) == 0
+          - (atomic_commit_plan_pretransfer_cleanup_stat.stat.gid | default(-1) | int) == 0
+          - atomic_commit_plan_pretransfer_cleanup_stat.stat.gr_name | default('') == 'wheel'
+          - atomic_commit_plan_pretransfer_cleanup_stat.stat.mode | default('') == '0700'
+          - >-
+            atomic_commit_plan_pretransfer_cleanup_stat.stat.inode ==
+            atomic_commit_plan_dir_root_stat.stat.inode
+      failed_when: false
+      no_log: true
+      become: false
+      when:
+        - not (atomic_commit_plan_dir_transferred | default(false) | bool)
+        - atomic_commit_plan_dir | default('') is match('^/private/var/run/openduck-plan-[a-z0-9_]{6,128}$')
+        - "'..' not in (atomic_commit_plan_dir | default(''))"
+
+    - name: Remove only validated root-owned PlanV2 handoff before transfer
+      ansible.builtin.file:
+        path: "{{ atomic_commit_plan_dir | default('') }}"
+        state: absent
+      register: atomic_commit_plan_pretransfer_cleanup_result
+      failed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+      when:
+        - not (atomic_commit_plan_dir_transferred | default(false) | bool)
+        - atomic_commit_plan_dir | default('') is match('^/private/var/run/openduck-plan-[a-z0-9_]{6,128}$')
+        - "'..' not in (atomic_commit_plan_dir | default(''))"
+        - atomic_commit_plan_pretransfer_cleanup_stat.stat.isdir | default(false)
+        - not (atomic_commit_plan_pretransfer_cleanup_stat.stat.islnk | default(false))
+        - (atomic_commit_plan_pretransfer_cleanup_stat.stat.uid | default(-1) | int) == 0
+        - (atomic_commit_plan_pretransfer_cleanup_stat.stat.gid | default(-1) | int) == 0
+        - atomic_commit_plan_pretransfer_cleanup_stat.stat.gr_name | default('') == 'wheel'
+        - atomic_commit_plan_pretransfer_cleanup_stat.stat.mode | default('') == '0700'
+        - atomic_commit_plan_pretransfer_cleanup_stat.stat.inode == atomic_commit_plan_dir_root_stat.stat.inode
+
+    - name: Preserve bounded pre-transfer PlanV2 cleanup result
+      ansible.builtin.set_fact:
+        atomic_commit_plan_cleanup_failed: >-
+          {{ (atomic_commit_plan_pretransfer_cleanup_result.failed | default(false) | bool) or
+             (atomic_commit_plan_pretransfer_cleanup_result is skipped) }}
+      no_log: true
+      become: false
+      when:
+        - not (atomic_commit_plan_dir_transferred | default(false) | bool)
+        - atomic_commit_plan_dir | default('') is match('^/private/var/run/openduck-plan-[a-z0-9_]{6,128}$')
+        - "'..' not in (atomic_commit_plan_dir | default(''))"
+
+    - name: Restat transferred PlanV2 handoff before unprivileged cleanup
+      ansible.builtin.stat:
+        path: "{{ atomic_commit_plan_dir | default('') }}"
+        follow: false
+      register: atomic_commit_plan_transferred_cleanup_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: false
+      when:
+        - atomic_commit_plan_dir_transferred | default(false) | bool
+        - atomic_commit_plan_dir | default('') is match('^/private/var/run/openduck-plan-[a-z0-9_]{6,128}$')
+        - "'..' not in (atomic_commit_plan_dir | default(''))"
+
+    - name: Require intact transferred PlanV2 handoff before unprivileged cleanup
+      ansible.builtin.assert:
+        that:
+          - atomic_commit_plan_transferred_cleanup_stat.stat.isdir | default(false)
+          - not (atomic_commit_plan_transferred_cleanup_stat.stat.islnk | default(false))
+          - (atomic_commit_plan_transferred_cleanup_stat.stat.uid | default(-1) | int) == (ansible_user_uid | int)
+          - (atomic_commit_plan_transferred_cleanup_stat.stat.gid | default(-1) | int) == (ansible_user_gid | int)
+          - atomic_commit_plan_transferred_cleanup_stat.stat.mode | default('') == '0700'
+          - >-
+            atomic_commit_plan_transferred_cleanup_stat.stat.inode ==
+            atomic_commit_plan_dir_root_stat.stat.inode
+      failed_when: false
+      no_log: true
+      become: false
+      when:
+        - atomic_commit_plan_dir_transferred | default(false) | bool
+        - atomic_commit_plan_dir | default('') is match('^/private/var/run/openduck-plan-[a-z0-9_]{6,128}$')
+        - "'..' not in (atomic_commit_plan_dir | default(''))"
+
+    - name: Remove only validated transferred PlanV2 handoff without privilege
+      ansible.builtin.file:
+        path: "{{ atomic_commit_plan_dir | default('') }}"
+        state: absent
+      register: atomic_commit_plan_transferred_cleanup_result
+      failed_when: false
+      check_mode: false
+      no_log: true
+      become: false
+      when:
+        - atomic_commit_plan_dir_transferred | default(false) | bool
+        - atomic_commit_plan_dir | default('') is match('^/private/var/run/openduck-plan-[a-z0-9_]{6,128}$')
+        - "'..' not in (atomic_commit_plan_dir | default(''))"
+        - atomic_commit_plan_transferred_cleanup_stat.stat.isdir | default(false)
+        - not (atomic_commit_plan_transferred_cleanup_stat.stat.islnk | default(false))
+        - (atomic_commit_plan_transferred_cleanup_stat.stat.uid | default(-1) | int) == (ansible_user_uid | int)
+        - (atomic_commit_plan_transferred_cleanup_stat.stat.gid | default(-1) | int) == (ansible_user_gid | int)
+        - atomic_commit_plan_transferred_cleanup_stat.stat.mode | default('') == '0700'
+        - atomic_commit_plan_transferred_cleanup_stat.stat.inode == atomic_commit_plan_dir_root_stat.stat.inode
+
+    - name: Preserve bounded transferred PlanV2 cleanup result
+      ansible.builtin.set_fact:
+        atomic_commit_plan_cleanup_failed: >-
+          {{ (atomic_commit_plan_cleanup_failed | bool) or
+             (atomic_commit_plan_transferred_cleanup_result.failed | default(false) | bool) or
+             (atomic_commit_plan_transferred_cleanup_result is skipped) }}
+      no_log: true
+      become: false
+      when:
+        - atomic_commit_plan_dir_transferred | default(false) | bool
+        - atomic_commit_plan_dir | default('') is match('^/private/var/run/openduck-plan-[a-z0-9_]{6,128}$')
+        - "'..' not in (atomic_commit_plan_dir | default(''))"
+
+- name: Fail closed while preserving primary PlanV2 failure
+  ansible.builtin.fail:
+    msg: "OpenDuck PlanV2 handoff failed"
+  when: atomic_commit_plan_primary_failure != ''
+  no_log: true
+  become: false
+
+- name: Fail closed on PlanV2 cleanup failure without masking a primary failure
+  ansible.builtin.fail:
+    msg: "OpenDuck PlanV2 handoff cleanup failed"
+  when: atomic_commit_plan_cleanup_failed | bool
+  no_log: true
+  become: false

@@ -1,0 +1,14 @@
+{
+  "profile_id": "openduck-synthetic-ui-only-v1",
+  "description": "Probe expectation and deny-overlay input; stock DSH does not consume or enforce this JSON file.",
+  "mode": "synthetic",
+  "agent_loop": { "enabled": false },
+  "llm": { "providers": [], "model_resolution": "deny" },
+  "session": { "create": false, "persistence": "disabled", "prompt": "deny", "steer": "deny", "followup": "deny" },
+  "subagents": { "enabled": false, "private_children": "deny" },
+  "read_model": { "channel": "controller-local-http", "cache": "memory-only", "session_events": false, "post_message": false },
+  "browser": { "local_storage": false, "session_storage": false, "indexed_db": false, "service_worker": false, "cache_storage": false, "telemetry": false },
+  "controller": { "base_url": "http://127.0.0.1:8788", "down_state": "degraded_read_only", "writes": false },
+  "server": { "prompt_api": "deny", "mutation_methods": "deny" },
+  "network": { "provider_egress": false, "real_accounts": false, "credentials": false }
+}

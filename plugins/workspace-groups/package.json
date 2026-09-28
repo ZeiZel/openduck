@@ -1,0 +1,35 @@
+{
+  "name": "@openduck/workspace-groups",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fail-closed static UI state for Controller-authorized Workspace Groups.",
+  "main": "./src/index.js",
+  "types": "./src/contracts.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/contracts.d.ts",
+      "default": "./src/index.js"
+    },
+    "./synthetic-harness": "./test/synthetic-harness.mjs",
+    "./client": "./src/dsh-client.js"
+  },
+  "files": ["src", "dsh.disabled.json", "README.md"],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "node --check src/index.js && node --check src/dsh-client.js && node --check test/*.mjs",
+    "harness": "node test/synthetic-harness.mjs"
+  },
+  "openduck": {
+    "dsh": {
+      "status": "disabled",
+      "reason": "Controller routes, authenticated same-origin UI bridge, and package registration are not yet composed and reviewed."
+    }
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  }
+}

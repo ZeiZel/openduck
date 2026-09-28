@@ -1,0 +1,11 @@
+---
+- name: Do not mutate launchd during check mode
+  ansible.builtin.debug:
+    msg: "check mode: launchd activation skipped"
+  when: ansible_check_mode
+  become: false
+
+- name: Record launchd boundary for atomic installer
+  ansible.builtin.set_fact:
+    launchd_validated: true
+  become: false

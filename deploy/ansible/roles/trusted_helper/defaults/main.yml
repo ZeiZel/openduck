@@ -1,0 +1,5 @@
+---
+# These are authorities, not release inputs.  They intentionally have no
+# staged_source-derived defaults.
+trusted_helper_installer_path: "/Library/Application Support/OpenDuck/.openduck-installer"
+trusted_helper_root: "/Library/Application Support/OpenDuck"

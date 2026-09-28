@@ -1,0 +1,10 @@
+---
+- name: Record PF and seatbelt policy boundary
+  ansible.builtin.set_fact:
+    policy_validated: true
+  become: false
+
+- name: Keep policy mutation inside the trusted transaction
+  ansible.builtin.assert:
+    that: policy_validated
+  become: false

@@ -1,0 +1,192 @@
+---
+- name: Initialize Apply cleanup state
+  ansible.builtin.set_fact:
+    atomic_commit_apply_primary_failed: false
+    atomic_commit_apply_cleanup_failed: false
+  no_log: true
+  become: false
+
+- name: Copy, hash-check, and run one sealed deploy operation
+  block:
+    - name: Recheck random invocation handoff before Apply helper copy
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path }}"
+        follow: false
+      register: atomic_commit_apply_run_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require intact random invocation handoff before Apply helper copy
+      ansible.builtin.assert:
+        that:
+          - lifecycle_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+          - atomic_commit_apply_run_dir_stat.stat.isdir | default(false)
+          - not (atomic_commit_apply_run_dir_stat.stat.islnk | default(false))
+          - (atomic_commit_apply_run_dir_stat.stat.uid | default(-1) | int) == 0
+          - (atomic_commit_apply_run_dir_stat.stat.gid | default(-1) | int) == 0
+          - atomic_commit_apply_run_dir_stat.stat.gr_name | default('') == 'wheel'
+          - atomic_commit_apply_run_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+    - name: Copy deploy helper
+      ansible.builtin.copy:
+        src: "{{ trusted_helper_path }}"
+        dest: "{{ lifecycle_run_handoff.path }}/apply-installer"
+        remote_src: true
+        owner: root
+        group: wheel
+        mode: '0700'
+      no_log: true
+      become: true
+    - name: Hash-check deploy helper
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path }}/apply-installer"
+        follow: false
+        checksum_algorithm: sha256
+      register: atomic_commit_apply_helper_stat
+      check_mode: false
+      no_log: true
+      become: true
+    - name: Assert deploy helper hash
+      ansible.builtin.assert:
+        that:
+          - atomic_commit_apply_helper_stat.stat.isreg | default(false)
+          - not (atomic_commit_apply_helper_stat.stat.islnk | default(false))
+          - (atomic_commit_apply_helper_stat.stat.nlink | default(0) | int) == 1
+          - atomic_commit_apply_helper_stat.stat.mode | default('') == '0700'
+          - atomic_commit_apply_helper_stat.stat.checksum == trusted_helper_digest
+      no_log: true
+      become: false
+    - name: Recheck random invocation handoff before Apply helper execution
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path }}"
+        follow: false
+      register: atomic_commit_apply_exec_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+    - name: Require intact random invocation handoff before Apply helper execution
+      ansible.builtin.assert:
+        that:
+          - atomic_commit_apply_exec_dir_stat.stat.isdir | default(false)
+          - not (atomic_commit_apply_exec_dir_stat.stat.islnk | default(false))
+          - (atomic_commit_apply_exec_dir_stat.stat.uid | default(-1) | int) == 0
+          - (atomic_commit_apply_exec_dir_stat.stat.gid | default(-1) | int) == 0
+          - atomic_commit_apply_exec_dir_stat.stat.gr_name | default('') == 'wheel'
+          - atomic_commit_apply_exec_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+    - name: Run literal sealed deploy operation
+      ansible.builtin.command:
+        argv:
+          - "{{ lifecycle_run_handoff.path }}/apply-installer"
+          - --deploy
+          - "--activation={{ 'true' if (openduck_activate | bool) else 'false' }}"
+          - --error-json-file
+          - "{{ lifecycle_run_handoff.path }}/helper-error.json"
+          - --release-id
+          - "{{ release_id }}"
+          - --release-version
+          - "{{ release_version }}"
+          - --release-digest
+          - "{{ release_digest }}"
+          - --release-envelope
+          - "{{ release_envelope }}"
+          - --release-manifest
+          - "{{ release_manifest }}"
+          - --release-trust-bundle
+          - "{{ release_trust_bundle }}"
+          - --release-nonce-store
+          - "{{ openduck_release_nonce_store_path }}"
+          - --run-id
+          - "{{ lifecycle_effective_run_id }}"
+          - --binary-dir
+          - "{{ staged_source }}"
+      register: atomic_commit_apply_result
+      changed_when: true
+      no_log: true
+      become: true
+  rescue:
+    - name: Sanitize Apply helper failure
+      ansible.builtin.include_tasks: ../../diagnostics/tasks/sanitize_helper_error.yml
+      vars:
+        diagnostics_effective_run_id: "{{ lifecycle_effective_run_id }}"
+        diagnostics_helper_phase: deploy
+        diagnostics_run_dir: "{{ lifecycle_run_handoff.path }}"
+        diagnostics_helper_error_path: "{{ lifecycle_run_handoff.path }}/helper-error.json"
+    - name: Preserve bounded Apply primary failure
+      ansible.builtin.set_fact:
+        atomic_commit_apply_primary_failed: true
+      no_log: true
+      become: false
+  always:
+    - name: Recheck random invocation handoff before Apply helper cleanup
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path | default('') }}"
+        follow: false
+      register: atomic_commit_apply_cleanup_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+      when:
+        - lifecycle_run_handoff.path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+        - "'..' not in (lifecycle_run_handoff.path | default(''))"
+    - name: Require intact random invocation handoff before Apply helper cleanup
+      ansible.builtin.assert:
+        that:
+          - lifecycle_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+          - "'..' not in lifecycle_run_handoff.path"
+          - atomic_commit_apply_cleanup_dir_stat.stat.isdir | default(false)
+          - not (atomic_commit_apply_cleanup_dir_stat.stat.islnk | default(false))
+          - (atomic_commit_apply_cleanup_dir_stat.stat.uid | default(-1) | int) == 0
+          - (atomic_commit_apply_cleanup_dir_stat.stat.gid | default(-1) | int) == 0
+          - atomic_commit_apply_cleanup_dir_stat.stat.gr_name | default('') == 'wheel'
+          - atomic_commit_apply_cleanup_dir_stat.stat.mode | default('') == '0700'
+      failed_when: false
+      no_log: true
+      become: false
+      when:
+        - lifecycle_run_handoff.path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+        - "'..' not in (lifecycle_run_handoff.path | default(''))"
+    - name: Remove only guarded Apply helper copy
+      ansible.builtin.file:
+        path: "{{ lifecycle_run_handoff.path }}/apply-installer"
+        state: absent
+      register: atomic_commit_apply_cleanup_result
+      failed_when: false
+      no_log: true
+      become: true
+      when:
+        - lifecycle_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+        - "'..' not in lifecycle_run_handoff.path"
+        - atomic_commit_apply_cleanup_dir_stat.stat.isdir | default(false)
+        - not (atomic_commit_apply_cleanup_dir_stat.stat.islnk | default(false))
+        - (atomic_commit_apply_cleanup_dir_stat.stat.uid | default(-1) | int) == 0
+        - (atomic_commit_apply_cleanup_dir_stat.stat.gid | default(-1) | int) == 0
+        - atomic_commit_apply_cleanup_dir_stat.stat.gr_name | default('') == 'wheel'
+        - atomic_commit_apply_cleanup_dir_stat.stat.mode | default('') == '0700'
+    - name: Preserve Apply cleanup result
+      ansible.builtin.set_fact:
+        atomic_commit_apply_cleanup_failed: >-
+          {{ (atomic_commit_apply_cleanup_result.failed | default(false) | bool) or
+             (atomic_commit_apply_cleanup_result is skipped) }}
+      no_log: true
+      become: false
+
+- name: Fail closed while preserving Apply primary failure
+  ansible.builtin.fail:
+    msg: "Trusted OpenDuck sealed deploy transaction failed"
+  when: atomic_commit_apply_primary_failed | bool
+  no_log: true
+  become: false
+
+- name: Fail closed on Apply cleanup failure
+  ansible.builtin.fail:
+    msg: "Trusted OpenDuck sealed deploy cleanup failed"
+  when: atomic_commit_apply_cleanup_failed | bool
+  no_log: true
+  become: false

@@ -1,0 +1,201 @@
+---
+- name: Provision OpenDuck macOS boundary
+  hosts: localhost
+  gather_facts: true
+  vars:
+    openduck_root: "/Library/Application Support/OpenDuck"
+    openduck_installer_name: "openduck-installer"
+    # Rollback is never automatic: it needs its own signed rollback envelope and
+    # a fresh nonce. The rescue path only records that requirement.
+    openduck_rollback_on_failure: false
+  tasks:
+    - name: Run bounded deployment roles
+      block:
+        - name: Require explicit release inputs
+          ansible.builtin.assert:
+            that:
+              - release_digest is string
+              - release_digest is match('^[0-9a-f]{64}$')
+              - staged_source is string
+              - staged_source is match('^/')
+            fail_msg: "release_digest (64 hex) and absolute staged_source are required"
+          tags: [always, preflight]
+          become: false
+        - name: Reject overridden fixed installer contract
+          ansible.builtin.assert:
+            that:
+              - openduck_root == '/Library/Application Support/OpenDuck'
+              - openduck_installer_name == 'openduck-installer'
+            fail_msg: "fixed root and installer name cannot be overridden"
+          tags: [always, preflight]
+          become: false
+        - name: Run preflight role
+          ansible.builtin.include_role:
+            name: preflight
+          tags: [always, preflight]
+        - name: Run stage role
+          ansible.builtin.include_role:
+            name: stage
+          tags: [always, stage]
+        - name: Publish stage contract to the deployment play
+          ansible.builtin.set_fact:
+            release_id: "{{ stage_release_id }}"
+            release_version: "{{ stage_release_version }}"
+            release_digest: "{{ stage_release_digest }}"
+            release_run_id: "{{ stage_release_run_id }}"
+            release_operation: "{{ stage_release_operation }}"
+            release_activation: "{{ stage_release_activation }}"
+            openduck_activate: "{{ stage_activate }}"
+            release_envelope: "{{ stage_release_envelope }}"
+            release_manifest: "{{ stage_release_manifest }}"
+            release_trust_bundle: "{{ stage_release_trust_bundle }}"
+            release_nonce_store: "{{ stage_release_nonce_store }}"
+            openduck_release_envelope_path: "{{ stage_release_envelope_path }}"
+            openduck_release_manifest_path: "{{ stage_release_manifest_path }}"
+            openduck_release_trust_bundle_path: "{{ stage_release_trust_bundle_path }}"
+            openduck_release_nonce_store_path: "{{ stage_release_nonce_store_path }}"
+            openduck_release_artifacts: "{{ stage_release_artifacts }}"
+            openduck_release_projection: "{{ stage_release_projection }}"
+            openduck_artifact_set_digest: "{{ stage_artifact_set_digest }}"
+            canonical_artifact_set_digest: "{{ stage_canonical_artifact_set_digest }}"
+          no_log: true
+          tags: [always, stage]
+          become: false
+        - name: Run trusted helper role
+          ansible.builtin.include_role:
+            name: trusted_helper
+          tags: [always, trusted_helper]
+        - name: Run lifecycle role
+          ansible.builtin.include_role:
+            name: lifecycle
+          tags: [lifecycle]
+        - name: Run principals role
+          ansible.builtin.include_role:
+            name: principals
+          tags: [principals]
+        - name: Run layout role
+          ansible.builtin.include_role:
+            name: layout
+          tags: [layout]
+        - name: Run artifacts role
+          ansible.builtin.include_role:
+            name: artifacts
+          tags: [artifacts]
+        - name: Validate inactive provider daemon contracts
+          ansible.builtin.include_role:
+            name: provider_daemons
+          tags: [provider_daemons]
+        - name: Run ownership role
+          ansible.builtin.include_role:
+            name: ownership
+          tags: [ownership]
+        - name: Run policy role
+          ansible.builtin.include_role:
+            name: policy
+          tags: [policy]
+        - name: Run launchd role
+          ansible.builtin.include_role:
+            name: launchd
+          tags: [launchd]
+        - name: Run atomic commit role
+          ansible.builtin.include_role:
+            name: atomic_commit
+          tags: [commit, atomic_commit]
+        - name: Run activation role
+          ansible.builtin.include_role:
+            name: activation
+          tags: [activation]
+        - name: Run readiness role
+          ansible.builtin.include_role:
+            name: readiness
+          tags: [readiness]
+      rescue:
+        - name: Record that rollback needs a separately signed rollback envelope
+          ansible.builtin.set_fact:
+            openduck_rollback_separate_admission_required: true
+          tags: [rollback]
+          when:
+            - openduck_rollback_on_failure | bool
+            - atomic_commit_changed | default(false) | bool
+          become: false
+        - name: Mark deployment failed for diagnostics
+          ansible.builtin.set_fact:
+            openduck_deployment_failed: true
+          become: false
+      always:
+        - name: Run diagnostics after success or failure
+          ansible.builtin.include_role:
+            name: diagnostics
+          tags: [always, diagnostics]
+        - name: Recheck random invocation handoff before final cleanup
+          ansible.builtin.stat:
+            path: "{{ lifecycle_run_handoff.path | default('') }}"
+            follow: false
+          register: openduck_run_cleanup_dir_stat
+          changed_when: false
+          no_log: true
+          become: true
+          when:
+            - not ansible_check_mode
+            - lifecycle_run_handoff.path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+            - "'..' not in (lifecycle_run_handoff.path | default(''))"
+        - name: Require intact random invocation handoff before final cleanup
+          ansible.builtin.assert:
+            that:
+              - lifecycle_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+              - "'..' not in lifecycle_run_handoff.path"
+              - openduck_run_cleanup_dir_stat.stat.isdir | default(false)
+              - not (openduck_run_cleanup_dir_stat.stat.islnk | default(false))
+              - (openduck_run_cleanup_dir_stat.stat.uid | default(-1) | int) == 0
+              - (openduck_run_cleanup_dir_stat.stat.gid | default(-1) | int) == 0
+              - openduck_run_cleanup_dir_stat.stat.gr_name | default('') == 'wheel'
+              - openduck_run_cleanup_dir_stat.stat.mode | default('') == '0700'
+          failed_when: false
+          no_log: true
+          become: false
+          when:
+            - not ansible_check_mode
+            - lifecycle_run_handoff.path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+            - "'..' not in (lifecycle_run_handoff.path | default(''))"
+        - name: Remove only validated random invocation handoff directory
+          ansible.builtin.file:
+            path: "{{ lifecycle_run_handoff.path | default('') }}"
+            state: absent
+          register: openduck_run_cleanup_result
+          failed_when: false
+          when:
+            - not ansible_check_mode
+            - lifecycle_run_handoff is defined
+            - lifecycle_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+            - "'..' not in lifecycle_run_handoff.path"
+            - openduck_run_cleanup_dir_stat.stat.isdir | default(false)
+            - not (openduck_run_cleanup_dir_stat.stat.islnk | default(false))
+            - (openduck_run_cleanup_dir_stat.stat.uid | default(-1) | int) == 0
+            - (openduck_run_cleanup_dir_stat.stat.gid | default(-1) | int) == 0
+            - openduck_run_cleanup_dir_stat.stat.gr_name | default('') == 'wheel'
+            - openduck_run_cleanup_dir_stat.stat.mode | default('') == '0700'
+          no_log: true
+          become: true
+        - name: Preserve bounded invocation handoff cleanup result
+          ansible.builtin.set_fact:
+            openduck_run_cleanup_failed: >-
+              {{ (openduck_run_cleanup_result.failed | default(false) | bool) or
+                 ((lifecycle_run_handoff is defined) and
+                  (openduck_run_cleanup_result is skipped) and not ansible_check_mode) }}
+          no_log: true
+          become: false
+
+    - name: Fail after diagnostics preserved the transaction result
+      ansible.builtin.fail:
+        msg: "OpenDuck deployment failed; inspect the restrictive JSONL diagnostics log"
+      when: openduck_deployment_failed | default(false) | bool
+      become: false
+
+    - name: Fail closed on invocation handoff cleanup after primary result
+      ansible.builtin.fail:
+        msg: "OpenDuck invocation handoff cleanup failed"
+      when:
+        - not (openduck_deployment_failed | default(false) | bool)
+        - openduck_run_cleanup_failed | default(false) | bool
+      no_log: true
+      become: false

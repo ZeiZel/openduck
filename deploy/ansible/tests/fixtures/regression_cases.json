@@ -1,0 +1,11 @@
+{
+  "schema": "openduck.ansible.regression-fixtures.v1",
+  "cases": [
+    {"name": "dseditgroup_exit_67", "expected": "ambiguous"},
+    {"name": "unsafe_root_and_paths", "expected": "fail_closed"},
+    {"name": "stale_key_ownership", "expected": "no_adhoc_chown"},
+    {"name": "primary_compensation_separation", "expected": "preserve_primary"},
+    {"name": "activation_false_scoped_verify", "expected": "candidate_verify"},
+    {"name": "release_replay_and_signature", "expected": "trusted_installer"}
+  ]
+}

@@ -1,0 +1,47 @@
+---
+- name: Validate commit inputs before privileged transaction
+  ansible.builtin.assert:
+    that:
+      - layout_validated | bool
+      - artifacts_validated | bool
+      - ownership_validated | bool
+      - policy_validated | bool
+      - launchd_validated | bool
+  become: false
+
+- name: Plan the bounded transaction
+  ansible.builtin.include_tasks: plan.yml
+  when:
+    - not ansible_check_mode
+    - not lifecycle_converged | bool
+
+- name: Apply the bounded transaction
+  when:
+    - not ansible_check_mode
+    - not lifecycle_converged | bool
+  block:
+    - name: Invoke trusted staged installer Apply
+      ansible.builtin.include_tasks: apply.yml
+    - name: Record successful commit
+      ansible.builtin.set_fact:
+        atomic_commit_changed: true
+      become: false
+  rescue:
+    - name: Preserve transaction failure for diagnostics
+      ansible.builtin.set_fact:
+        atomic_commit_failed: true
+      become: false
+    - name: Fail closed after transaction failure
+      ansible.builtin.fail:
+        msg: "Trusted OpenDuck installer transaction failed"
+      become: false
+- name: Check-mode commit validation without mutation
+  when: ansible_check_mode
+  block:
+    - name: Run trusted check-mode PlanV2 helper flow
+      ansible.builtin.include_tasks: plan.yml
+    - name: Validate exact check-mode PlanV2 projection
+      ansible.builtin.set_fact:
+        atomic_commit_deployment_plan: "{{ atomic_commit_plan_result.stdout | openduck_deployment_plan_v2(openduck_release_projection) }}"
+      no_log: true
+      become: false

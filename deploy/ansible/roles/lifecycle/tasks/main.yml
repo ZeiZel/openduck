@@ -1,0 +1,285 @@
+---
+- name: Record lifecycle mode
+  ansible.builtin.set_fact:
+    lifecycle_mode: "{{ 'check' if ansible_check_mode else 'apply' }}"
+  become: false
+
+- name: Record transaction identifier
+  ansible.builtin.set_fact:
+    lifecycle_effective_run_id: "{{ release_run_id }}"
+  become: false
+
+- name: Validate bounded transaction identifier
+  ansible.builtin.assert:
+    that:
+      - lifecycle_effective_run_id is match('^[0-9a-f-]{8,128}$')
+  become: false
+
+- name: Allocate random root-owned invocation handoff directory
+  ansible.builtin.tempfile:
+    state: directory
+    path: /private/var/run
+    prefix: openduck-ansible-
+  register: lifecycle_run_tempdir
+  check_mode: false
+  no_log: true
+  become: true
+  when: not ansible_check_mode
+
+- name: Normalize invocation handoff to root:wheel before verification
+  ansible.builtin.file:
+    path: "{{ lifecycle_run_tempdir.path }}"
+    state: directory
+    owner: root
+    group: wheel
+    mode: '0700'
+    follow: false
+  check_mode: false
+  no_log: true
+  become: true
+  when: not ansible_check_mode
+
+- name: Bind random invocation handoff path separately from signed run ID
+  ansible.builtin.set_fact:
+    lifecycle_run_handoff:
+      path: "{{ lifecycle_run_tempdir.path }}"
+  no_log: true
+  become: false
+  when: not ansible_check_mode
+
+- name: Inspect newly allocated invocation handoff without following links
+  ansible.builtin.stat:
+    path: "{{ lifecycle_run_handoff.path }}"
+    follow: false
+  register: lifecycle_run_dir_stat
+  check_mode: false
+  no_log: true
+  become: true
+  when: not ansible_check_mode
+
+- name: Require random root-owned invocation handoff metadata
+  ansible.builtin.assert:
+    that:
+      - lifecycle_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+      - "'..' not in lifecycle_run_handoff.path"
+      - lifecycle_run_dir_stat.stat.isdir | default(false)
+      - not (lifecycle_run_dir_stat.stat.islnk | default(false))
+      - (lifecycle_run_dir_stat.stat.uid | default(-1) | int) == 0
+      - (lifecycle_run_dir_stat.stat.gid | default(-1) | int) == 0
+      - lifecycle_run_dir_stat.stat.gr_name | default('') == 'wheel'
+      - lifecycle_run_dir_stat.stat.mode | default('') == '0700'
+    fail_msg: "random invocation handoff is unsafe"
+  no_log: true
+  become: false
+  when: not ansible_check_mode
+
+- name: Default to drift until authoritative probes pass
+  ansible.builtin.set_fact:
+    lifecycle_converged: false
+  become: false
+
+- name: Copy selected trusted helper before pre-mutation root execution
+  ansible.builtin.copy:
+    src: "{{ trusted_helper_path }}"
+    dest: "{{ lifecycle_run_handoff.path }}/preflight-installer"
+    remote_src: true
+    owner: root
+    group: wheel
+    mode: '0700'
+  no_log: true
+  become: true
+  when: not ansible_check_mode
+
+- name: Rehash copied pre-mutation trusted helper
+  ansible.builtin.stat:
+    path: "{{ lifecycle_run_handoff.path }}/preflight-installer"
+    follow: false
+    checksum_algorithm: sha256
+  register: lifecycle_preflight_helper_stat
+  check_mode: false
+  no_log: true
+  become: true
+  when: not ansible_check_mode
+
+- name: Require copied pre-mutation helper to match selected authority
+  ansible.builtin.assert:
+    that:
+      - lifecycle_preflight_helper_stat.stat.checksum == trusted_helper_digest
+      - lifecycle_preflight_helper_stat.stat.isreg | default(false)
+      - not (lifecycle_preflight_helper_stat.stat.islnk | default(false))
+      - (lifecycle_preflight_helper_stat.stat.nlink | default(0) | int) == 1
+      - lifecycle_preflight_helper_stat.stat.mode | default('') == '0700'
+    fail_msg: "selected trusted helper changed during pre-mutation copy"
+  no_log: true
+  become: false
+  when: not ansible_check_mode
+
+- name: Inspect installed trusted helper for convergence probe
+  ansible.builtin.stat:
+    path: "/Library/Application Support/OpenDuck/.openduck-installer"
+    follow: false
+  register: lifecycle_installed_helper_stat
+  check_mode: false
+  become: true
+  when: not ansible_check_mode
+
+- name: Run authoritative full verification before mutation
+  when:
+    - not ansible_check_mode
+    - lifecycle_installed_helper_stat.stat.isreg | default(false)
+    - not lifecycle_installed_helper_stat.stat.islnk | default(false)
+    - (lifecycle_installed_helper_stat.stat.nlink | default(0) | int) == 1
+    - (lifecycle_installed_helper_stat.stat.uid | default(-1) | int) == 0
+    - (lifecycle_installed_helper_stat.stat.gid | default(-1) | int) == 0
+    - lifecycle_installed_helper_stat.stat.gr_name | default('') == 'wheel'
+    - lifecycle_installed_helper_stat.stat.mode | default('') == '0700'
+  block:
+    - name: Recheck random invocation handoff before helper execution
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path }}"
+        follow: false
+      register: lifecycle_preflight_run_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require intact root-owned invocation handoff before helper execution
+      ansible.builtin.assert:
+        that:
+          - lifecycle_preflight_run_dir_stat.stat.isdir | default(false)
+          - not (lifecycle_preflight_run_dir_stat.stat.islnk | default(false))
+          - (lifecycle_preflight_run_dir_stat.stat.uid | default(-1) | int) == 0
+          - (lifecycle_preflight_run_dir_stat.stat.gid | default(-1) | int) == 0
+          - lifecycle_preflight_run_dir_stat.stat.gr_name | default('') == 'wheel'
+          - lifecycle_preflight_run_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+
+    - name: Invoke installed helper full verification
+      ansible.builtin.command:
+        argv:
+          - "{{ lifecycle_run_handoff.path }}/preflight-installer"
+          - --verify-json=full
+          - --release-id
+          - "{{ release_id }}"
+          - --release-version
+          - "{{ release_version }}"
+          - --release-digest
+          - "{{ release_digest }}"
+          - --run-id
+          - "{{ lifecycle_effective_run_id }}"
+      register: lifecycle_preflight_full_result
+      changed_when: false
+      no_log: true
+      become: true
+
+    - name: Project pre-mutation full verification report without raw output
+      ansible.builtin.set_fact:
+        lifecycle_preflight_full_report: "{{ lifecycle_preflight_full_result.stdout | openduck_provisioning_verify_v1 }}"
+      no_log: true
+      become: false
+
+    - name: Record full verification drift result
+      ansible.builtin.set_fact:
+        lifecycle_full_verify_ok: >-
+          {{ lifecycle_preflight_full_report.available | default(false) | bool and
+             lifecycle_preflight_full_report.clean | default(false) | bool }}
+      no_log: true
+      become: false
+  rescue:
+    - name: Treat missing or failed full verification as drift
+      ansible.builtin.set_fact:
+        lifecycle_full_verify_ok: false
+      become: false
+- name: Inspect installed readiness for convergence when activation is enabled
+  ansible.builtin.stat:
+    path: "/Library/Application Support/OpenDuck/.openduck-readiness"
+    follow: false
+  register: lifecycle_preflight_readiness_stat
+  check_mode: false
+  become: true
+  when:
+    - not ansible_check_mode
+    - openduck_activate | bool
+    - lifecycle_full_verify_ok | default(false) | bool
+
+- name: Inspect installed readiness for convergence when activation is enabled
+  when:
+    - not ansible_check_mode
+    - openduck_activate | bool
+    - lifecycle_full_verify_ok | default(false) | bool
+    - lifecycle_preflight_readiness_stat.stat.isreg | default(false)
+    - not lifecycle_preflight_readiness_stat.stat.islnk | default(false)
+    - (lifecycle_preflight_readiness_stat.stat.nlink | default(0) | int) == 1
+    - (lifecycle_preflight_readiness_stat.stat.uid | default(-1) | int) == 0
+    - (lifecycle_preflight_readiness_stat.stat.gid | default(-1) | int) == 0
+    - lifecycle_preflight_readiness_stat.stat.mode | default('') == '0700'
+  block:
+    - name: Invoke installed readiness probe
+      ansible.builtin.command:
+        argv:
+          - "/Library/Application Support/OpenDuck/.openduck-readiness"
+      register: lifecycle_preflight_readiness_result
+      changed_when: false
+      no_log: true
+      become: true
+
+    - name: Project installed readiness fields without retaining raw output
+      ansible.builtin.set_fact:
+        lifecycle_preflight_readiness: "{{ lifecycle_preflight_readiness_result.stdout | openduck_readiness_v1 }}"
+      no_log: true
+      become: false
+
+    - name: Record installed readiness state
+      ansible.builtin.set_fact:
+        lifecycle_preflight_readiness_state: "{{ lifecycle_preflight_readiness.state }}"
+      when:
+        - lifecycle_preflight_readiness.available | default(false) | bool
+      no_log: true
+      become: false
+  rescue:
+    - name: Treat missing or failed readiness as drift
+      ansible.builtin.set_fact:
+        lifecycle_preflight_readiness_state: "UNAVAILABLE"
+      become: false
+- name: Mark host converged only when all required probes are clean
+  ansible.builtin.set_fact:
+    lifecycle_converged: >-
+      {{ lifecycle_full_verify_ok | default(false) | bool and
+         ((not openduck_activate | bool) or
+          lifecycle_preflight_readiness_state | default('UNAVAILABLE') in ['READY', 'SERVICE_LOGIN_REQUIRED', 'LIVE_EGRESS_CANARY_REQUIRED']) }}
+  when: not ansible_check_mode
+  become: false
+
+- name: Inspect fixed-root active release before stopping jobs
+  ansible.builtin.stat:
+    path: "/Library/Application Support/OpenDuck/active.release"
+    follow: false
+  register: lifecycle_active_release_stat
+  check_mode: false
+  become: true
+  when: not ansible_check_mode
+
+- name: Default installed release probe to absent
+  ansible.builtin.set_fact:
+    lifecycle_installed_release_present: false
+  become: false
+
+- name: Record whether an installed release exists
+  ansible.builtin.set_fact:
+    lifecycle_installed_release_present: >-
+      {{ lifecycle_active_release_stat.stat.exists | default(false) and
+         lifecycle_active_release_stat.stat.isreg | default(false) and
+         not (lifecycle_active_release_stat.stat.islnk | default(false)) }}
+  when: not ansible_check_mode
+  become: false
+
+- name: Delegate stop ordering to the sealed deploy transaction
+  ansible.builtin.set_fact:
+    lifecycle_stop_delegated_to_deploy: true
+  become: false
+  when:
+    - not ansible_check_mode
+    - not lifecycle_converged | bool
+    - lifecycle_installed_release_present | bool

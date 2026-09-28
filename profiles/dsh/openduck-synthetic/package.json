@@ -1,0 +1,17 @@
+{
+  "name": "dsh-profile-openduck-synthetic",
+  "private": true,
+  "dependencies": {
+    "@openduck/beads-memory-explorer": "file:../../../plugins/beads-memory-explorer",
+    "@openduck/workspace-groups": "file:../../../plugins/workspace-groups",
+    "@openduck/controller-read-bridge": "file:../../../plugins/controller-read-bridge"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app"
+      ]
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openduck.local/schemas/codex-broker/owner-runtime-broker.v1.json",
+  "title": "OpenDuck typed owner runtime broker",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "direction", "kind", "sequence", "request_id", "ok"],
+  "properties": {
+    "schema_version": {"const": "owner-runtime-broker.v1"},
+    "direction": {"enum": ["request", "response"]},
+    "kind": {"enum": ["attestation", "inventory", "login.start", "login.completed", "turn", "cancel", "close"]},
+    "sequence": {"type": "integer", "minimum": 1},
+    "request_id": {"type":"string","minLength":1,"maxLength":256,"pattern":"^[^\\r\\n/\\\\]+$"},
+    "ok": {"type": "boolean"},
+    "error_code": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:-]+$"},
+    "payload": {"oneOf": [
+      {"$ref": "#/$defs/empty"}, {"$ref": "#/$defs/attestation"}, {"$ref": "#/$defs/inventory"},
+      {"$ref": "#/$defs/loginStart"}, {"$ref": "#/$defs/loginStarted"}, {"$ref": "#/$defs/loginCompleted"}, {"$ref": "#/$defs/loginCompletedRequest"},
+      {"$ref": "#/$defs/turn"}, {"$ref": "#/$defs/turnResult"}, {"$ref": "#/$defs/cancel"}
+    ]}
+  },
+  "allOf": [
+    {"if":{"properties":{"direction":{"const":"request"}}},"then":{"properties":{"ok":{"const":false}}}},
+    {"if":{"properties":{"direction":{"const":"response"}}},"then":{"required":["ok"]}},
+    {"if":{"properties":{"direction":{"const":"request"},"kind":{"enum":["attestation","inventory","close"]}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/empty"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"request"},"kind":{"const":"login.start"}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/loginStart"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"request"},"kind":{"const":"login.completed"}}},"then":{"required":["payload"],"properties":{"payload":{"type":"object","additionalProperties":false,"required":["login_id"],"properties":{"login_id":{"$ref":"#/$defs/id"}}}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"request"},"kind":{"const":"turn"}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/turn"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"request"},"kind":{"const":"cancel"}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/cancel"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"response"},"ok":{"const":false}}},"then":{"required":["error_code"],"not":{"required":["payload"]}}},
+    {"if":{"properties":{"direction":{"const":"response"},"ok":{"const":true},"kind":{"const":"attestation"}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/attestation"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"response"},"ok":{"const":true},"kind":{"const":"inventory"}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/inventory"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"response"},"ok":{"const":true},"kind":{"const":"login.start"}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/loginStarted"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"response"},"ok":{"const":true},"kind":{"const":"login.completed"}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/loginCompleted"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"response"},"ok":{"const":true},"kind":{"const":"turn"}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/turnResult"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"direction":{"const":"response"},"ok":{"const":true},"kind":{"enum":["cancel","close"]}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/empty"}},"not":{"required":["error_code"]}}},
+    {"if":{"properties":{"kind":{"const":"attestation"}}},"then":{"properties":{"payload":{"oneOf":[{"$ref":"#/$defs/empty"},{"$ref":"#/$defs/attestation"}]}}}},
+    {"if":{"properties":{"kind":{"const":"inventory"}}},"then":{"properties":{"payload":{"oneOf":[{"$ref":"#/$defs/empty"},{"$ref":"#/$defs/inventory"}]}}}},
+    {"if":{"properties":{"kind":{"const":"turn"}}},"then":{"properties":{"payload":{"oneOf":[{"$ref":"#/$defs/turn"},{"$ref":"#/$defs/turnResult"}]}}}},
+    {"if":{"properties":{"direction":{"const":"response"},"ok":{"const":true},"kind":{"const":"close"}}},"then":{"required":["payload"],"properties":{"payload":{"$ref":"#/$defs/empty"}}}}
+  ],
+  "$defs": {
+    "id": {"type":"string","minLength":1,"maxLength":256,"pattern":"^[^\\r\\n/\\\\]+$"},
+    "digest": {"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+    "empty": {"type":"object","maxProperties":0},
+    "attestation": {"type":"object","additionalProperties":false,"required":["schema_version","runtime_id","peer_id","runtime_binary_digest","policy_digest","issued_at","peer_uid","peer_gid","epoch","broker_socket_digest","broker_release_digest","expected_egress_uid","expected_egress_gid","expected_egress_release_digest","expected_egress_socket_digest","signature"],"properties":{"schema_version":{"const":"owner-runtime-broker.v1"},"runtime_id":{"$ref":"#/$defs/id"},"peer_id":{"$ref":"#/$defs/id"},"runtime_binary_digest":{"$ref":"#/$defs/digest"},"policy_digest":{"$ref":"#/$defs/digest"},"issued_at":{"type":"string","format":"date-time"},"peer_uid":{"type":"integer","minimum":1},"peer_gid":{"type":"integer","minimum":1},"epoch":{"type":"integer","minimum":1},"broker_socket_digest":{"$ref":"#/$defs/digest"},"broker_release_digest":{"$ref":"#/$defs/digest"},"expected_egress_uid":{"type":"integer","minimum":1},"expected_egress_gid":{"type":"integer","minimum":1},"expected_egress_release_digest":{"$ref":"#/$defs/digest"},"expected_egress_socket_digest":{"$ref":"#/$defs/digest"},"signature":{"$ref":"#/$defs/digest"}}},
+    "inventory": {"type":"object","additionalProperties":false,"required":["schema_version","account_state","runtime_version","runtime_digest","model_only","tools","mcp","plugins","hooks"],"properties":{"schema_version":{"const":"owner-runtime-broker.v1"},"account_state":{"$ref":"#/$defs/id"},"runtime_version":{"$ref":"#/$defs/id"},"runtime_digest":{"$ref":"#/$defs/digest"},"model_only":{"const":true},"tools":{"type":"array","maxItems":0},"mcp":{"type":"array","maxItems":0},"plugins":{"type":"array","maxItems":0},"hooks":{"type":"array","maxItems":0}}},
+    "loginStart": {"type":"object","additionalProperties":false,"required":["account_type"],"properties":{"account_type":{"enum":["chatgpt","chatgptDeviceCode"]}}},
+    "loginCompletedRequest": {"type":"object","additionalProperties":false,"required":["login_id"],"properties":{"login_id":{"$ref":"#/$defs/id"}}},
+    "loginStarted": {"type":"object","additionalProperties":false,"required":["login_id"],"anyOf":[{"required":["authorization_url"]},{"required":["user_code"]}],"properties":{"login_id":{"$ref":"#/$defs/id"},"authorization_url":{"type":"string","minLength":1,"maxLength":2048,"x-maxBytes":2048,"pattern":"^https://[^\\r\\n]+$"},"user_code":{"type":"string","minLength":1,"maxLength":128,"x-maxBytes":128,"pattern":"^[^\\r\\n]+$"}}},
+    "loginCompleted": {"type":"object","additionalProperties":false,"required":["login_id","success"],"allOf":[{"if":{"properties":{"success":{"const":true}}},"then":{"not":{"required":["error_code"]}}},{"if":{"properties":{"success":{"const":false}}},"then":{"required":["error_code"]}}],"properties":{"login_id":{"$ref":"#/$defs/id"},"success":{"type":"boolean"},"error_code":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.:-]+$"}}},
+    "turn": {"type":"object","additionalProperties":false,"required":["session_id","turn_id","prompt","classification","max_output_bytes"],"properties":{"session_id":{"$ref":"#/$defs/id"},"turn_id":{"$ref":"#/$defs/id"},"prompt":{"type":"string","minLength":1,"maxLength":65536,"x-maxBytes":65536},"classification":{"enum":["L0","L1"]},"max_output_bytes":{"type":"integer","minimum":1,"maximum":262144}}},
+    "turnResult": {"type":"object","additionalProperties":false,"required":["session_id","turn_id","state"],"allOf":[{"if":{"properties":{"state":{"const":"completed"}}},"then":{"required":["answer"],"properties":{"answer":{"minLength":1,"x-maxBytes":262144}},"not":{"required":["error_code"]}}},{"if":{"properties":{"state":{"enum":["failed","cancelled"]}}},"then":{"required":["error_code"],"not":{"required":["answer"]}}}],"properties":{"session_id":{"$ref":"#/$defs/id"},"turn_id":{"$ref":"#/$defs/id"},"state":{"enum":["completed","failed","cancelled"]},"answer":{"type":"string","maxLength":262144,"x-maxBytes":262144},"error_code":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.:-]+$"}}},
+    "cancel": {"type":"object","additionalProperties":false,"required":["session_id","turn_id"],"properties":{"session_id":{"$ref":"#/$defs/id"},"turn_id":{"$ref":"#/$defs/id"}}}
+  }
+}

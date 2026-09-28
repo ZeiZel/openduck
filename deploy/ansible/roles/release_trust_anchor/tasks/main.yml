@@ -1,0 +1,201 @@
+---
+- name: Require explicit release trust anchor ceremony contract
+  ansible.builtin.assert:
+    that:
+      - release_trust_anchor_action == 'bootstrap'
+      - release_trust_anchor_path == '/Library/Application Support/OpenDuck.release-trust.v1.json'
+      - release_trust_anchor_source is string
+      - release_trust_anchor_source is match('^/')
+      - release_trust_anchor_sha256 is match('^[0-9a-f]{64}$')
+      - release_trust_anchor_bootstrap_helper_path is string
+      - release_trust_anchor_bootstrap_helper_path is match('^/')
+      - release_trust_anchor_bootstrap_helper_sha256 is match('^[0-9a-f]{64}$')
+    fail_msg: "release trust ceremony requires fixed path and independent helper/trust digests"
+  become: false
+
+- name: Inspect independently provisioned trust bootstrap helper
+  ansible.builtin.stat:
+    path: "{{ release_trust_anchor_bootstrap_helper_path }}"
+    follow: false
+    checksum_algorithm: sha256
+  register: release_trust_anchor_helper_stat
+  changed_when: false
+  check_mode: false
+  no_log: true
+  become: false
+
+- name: Require independently verified trust bootstrap helper
+  ansible.builtin.assert:
+    that:
+      - release_trust_anchor_helper_stat.stat.exists | default(false)
+      - release_trust_anchor_helper_stat.stat.isreg | default(false)
+      - not (release_trust_anchor_helper_stat.stat.islnk | default(false))
+      - (release_trust_anchor_helper_stat.stat.nlink | default(0) | int) == 1
+      - (release_trust_anchor_helper_stat.stat.mode | default('0666'))[-2] not in ['2', '3', '6', '7']
+      - (release_trust_anchor_helper_stat.stat.mode | default('0666'))[-1] not in ['2', '3', '6', '7']
+      - release_trust_anchor_helper_stat.stat.checksum == release_trust_anchor_bootstrap_helper_sha256
+    fail_msg: "trust bootstrap helper is not the independently verified immutable input"
+  no_log: true
+  become: false
+
+- name: Inspect operator-supplied release trust source without following links
+  ansible.builtin.stat:
+    path: "{{ release_trust_anchor_source }}"
+    follow: false
+    get_checksum: false
+  register: release_trust_anchor_source_stat
+  changed_when: false
+  check_mode: false
+  no_log: true
+  become: true
+
+- name: Require bounded regular release trust source
+  ansible.builtin.assert:
+    that:
+      - release_trust_anchor_source_stat.stat.exists | default(false)
+      - release_trust_anchor_source_stat.stat.isreg | default(false)
+      - not (release_trust_anchor_source_stat.stat.islnk | default(false))
+      - (release_trust_anchor_source_stat.stat.nlink | default(0) | int) == 1
+      - (release_trust_anchor_source_stat.stat.size | default(0) | int) > 1
+      - (release_trust_anchor_source_stat.stat.size | default(1048577) | int) <= 1048576
+    fail_msg: "release trust source must be a bounded non-linked regular file"
+  no_log: true
+  become: false
+
+- name: Bootstrap fixed release trust anchor
+  when: not ansible_check_mode
+  block:
+    - name: Allocate root-owned trust anchor handoff directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /private/var/run
+        prefix: openduck-trust-anchor-
+      register: release_trust_anchor_handoff_temp
+      no_log: true
+      become: true
+
+    - name: Normalize trust anchor handoff to root:wheel before verification
+      ansible.builtin.file:
+        path: "{{ release_trust_anchor_handoff_temp.path }}"
+        state: directory
+        owner: root
+        group: wheel
+        mode: '0700'
+        follow: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Inspect root-owned trust anchor handoff directory
+      ansible.builtin.stat:
+        path: "{{ release_trust_anchor_handoff_temp.path }}"
+        follow: false
+      register: release_trust_anchor_handoff_dir_stat
+      changed_when: false
+      no_log: true
+      become: true
+
+    - name: Require root-owned private trust anchor handoff directory
+      ansible.builtin.assert:
+        that:
+          - release_trust_anchor_handoff_temp.path is match('^/private/var/run/openduck-trust-anchor-[A-Za-z0-9_-]{6,128}$')
+          - release_trust_anchor_handoff_dir_stat.stat.isdir | default(false)
+          - not (release_trust_anchor_handoff_dir_stat.stat.islnk | default(false))
+          - (release_trust_anchor_handoff_dir_stat.stat.uid | default(-1) | int) == 0
+          - (release_trust_anchor_handoff_dir_stat.stat.gid | default(-1) | int) == 0
+          - release_trust_anchor_handoff_dir_stat.stat.gr_name | default('') == 'wheel'
+          - release_trust_anchor_handoff_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+
+    - name: Copy operator trust source into root-owned handoff
+      ansible.builtin.copy:
+        src: "{{ release_trust_anchor_source }}"
+        dest: "{{ release_trust_anchor_handoff_temp.path }}/release-trust.v1.json"
+        remote_src: true
+        owner: root
+        group: wheel
+        mode: '0600'
+      no_log: true
+      become: true
+
+    - name: Verify root-owned trust handoff exact digest
+      ansible.builtin.stat:
+        path: "{{ release_trust_anchor_handoff_temp.path }}/release-trust.v1.json"
+        follow: false
+        checksum_algorithm: sha256
+      register: release_trust_anchor_handoff_file_stat
+      changed_when: false
+      no_log: true
+      become: true
+
+    - name: Require exact root-owned trust handoff file
+      ansible.builtin.assert:
+        that:
+          - release_trust_anchor_handoff_file_stat.stat.isreg | default(false)
+          - not (release_trust_anchor_handoff_file_stat.stat.islnk | default(false))
+          - (release_trust_anchor_handoff_file_stat.stat.nlink | default(0) | int) == 1
+          - (release_trust_anchor_handoff_file_stat.stat.uid | default(-1) | int) == 0
+          - (release_trust_anchor_handoff_file_stat.stat.gid | default(-1) | int) == 0
+          - release_trust_anchor_handoff_file_stat.stat.gr_name | default('') == 'wheel'
+          - release_trust_anchor_handoff_file_stat.stat.mode | default('') == '0600'
+          - release_trust_anchor_handoff_file_stat.stat.checksum == release_trust_anchor_sha256
+        fail_msg: "copied release trust source differs from operator SHA-256"
+      no_log: true
+      become: false
+
+    - name: Copy independently verified helper into root-owned handoff
+      ansible.builtin.copy:
+        src: "{{ release_trust_anchor_bootstrap_helper_path }}"
+        dest: "{{ release_trust_anchor_handoff_temp.path }}/openduck-installer"
+        remote_src: true
+        owner: root
+        group: wheel
+        mode: '0700'
+      no_log: true
+      become: true
+
+    - name: Reverify copied trust bootstrap helper
+      ansible.builtin.stat:
+        path: "{{ release_trust_anchor_handoff_temp.path }}/openduck-installer"
+        follow: false
+        checksum_algorithm: sha256
+      register: release_trust_anchor_handoff_helper_stat
+      changed_when: false
+      no_log: true
+      become: true
+
+    - name: Require copied helper exact independently verified authority
+      ansible.builtin.assert:
+        that:
+          - release_trust_anchor_handoff_helper_stat.stat.isreg | default(false)
+          - not (release_trust_anchor_handoff_helper_stat.stat.islnk | default(false))
+          - (release_trust_anchor_handoff_helper_stat.stat.nlink | default(0) | int) == 1
+          - release_trust_anchor_handoff_helper_stat.stat.mode | default('') == '0700'
+          - (release_trust_anchor_handoff_helper_stat.stat.uid | default(-1) | int) == 0
+          - (release_trust_anchor_handoff_helper_stat.stat.gid | default(-1) | int) == 0
+          - release_trust_anchor_handoff_helper_stat.stat.gr_name | default('') == 'wheel'
+          - release_trust_anchor_handoff_helper_stat.stat.checksum == release_trust_anchor_bootstrap_helper_sha256
+      no_log: true
+      become: false
+
+    - name: Invoke fixed trust anchor bootstrap
+      ansible.builtin.command:
+        argv:
+          - "{{ release_trust_anchor_handoff_temp.path }}/openduck-installer"
+          - --bootstrap-release-trust
+          - --trust-bootstrap-source
+          - "{{ release_trust_anchor_handoff_temp.path }}/release-trust.v1.json"
+          - --trust-bootstrap-sha256
+          - "{{ release_trust_anchor_sha256 }}"
+      no_log: true
+      become: true
+      changed_when: true
+  always:
+    - name: Remove root-owned trust anchor handoff directory
+      ansible.builtin.file:
+        path: "{{ release_trust_anchor_handoff_temp.path | default('/private/var/run/.openduck-no-trust-anchor-handoff') }}"
+        state: absent
+      no_log: true
+      become: true
+      when: release_trust_anchor_handoff_temp.path | default('') is match('^/private/var/run/openduck-trust-anchor-[A-Za-z0-9_-]{6,128}$')

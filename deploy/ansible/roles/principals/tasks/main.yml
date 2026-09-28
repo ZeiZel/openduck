@@ -1,0 +1,12 @@
+---
+- name: Validate service-principal contract
+  ansible.builtin.assert:
+    that:
+      - openduck_root == '/Library/Application Support/OpenDuck'
+    fail_msg: "The fixed OpenDuck system root cannot be overridden"
+  become: false
+
+- name: Record principal domain for installer diagnostics
+  ansible.builtin.set_fact:
+    principals_domain: darwin_service_users
+  become: false

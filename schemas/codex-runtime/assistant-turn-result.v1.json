@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openduck.local/schemas/codex-runtime/assistant-turn-result.v1.json",
+  "title": "Bounded assistant turn result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "chat_id", "state", "started_at"],
+  "properties": {
+    "schema_version": {"const": "assistant-turn-result.v1"},
+    "chat_id": {"type": "string", "minLength": 1},
+    "thread_id": {"type": "string"},
+    "turn_id": {"type": "string"},
+    "state": {"enum": ["pending", "running", "completed", "failed", "cancelled"]},
+    "answer": {"type": "string", "maxLength": 262144},
+    "error_code": {"type": "string", "maxLength": 128},
+    "started_at": {"type": "string", "format": "date-time"},
+    "completed_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -1,0 +1,272 @@
+--- a/packages/core/session/src/openduck-admission.ts	2026-08-19 20:51:33
++++ b/packages/core/session/src/openduck-admission.ts	2026-08-19 20:56:30
+@@ -177,11 +177,36 @@
+ 
+ const currentReceipt = new AsyncLocalStorage<AdmissionReceipt>()
+ const pendingBySession = new Map<string, AdmissionReceipt[]>()
++const modelAppendMarker = Symbol('openduck model append capability')
++
++/**
++ * Opaque authority minted only by the successful model-dispatch gate.
++ * Its private symbol brand makes structural or cast-only caller values fail.
++ */
++export interface ModelAppendCapability {
++  readonly sessionId: SessionId
++  readonly [modelAppendMarker]: true
++}
++
+ interface DispatchAuthorization {
++  readonly capability: ModelAppendCapability
+   assistantPending: boolean
+   readonly expectedToolCalls: Set<string>
+ }
+ const dispatchAuthorizations = new Map<string, DispatchAuthorization>()
++const appendCapability = new AsyncLocalStorage<{ sessionId: string, kind: 'assistant' | 'tool', toolCallId?: string }>()
++
++/** Run exactly one agent-loop-owned durable output append with opaque authority. */
++export function withModelAppendCapability<T>(
++  capability: ModelAppendCapability,
++  kind: 'assistant' | 'tool',
++  work: () => T,
++  toolCallId?: string,
++): T {
++  const authorization = dispatchAuthorizations.get(capability.sessionId)
++  if (capability[modelAppendMarker] !== true || authorization?.capability !== capability) throw new AdmissionDeniedError()
++  return appendCapability.run({ sessionId: capability.sessionId, kind, ...(toolCallId === undefined ? {} : { toolCallId }) }, work)
++}
+ 
+ /** Keep a verified receipt bound across the exact producer call stack. */
+ export async function withAdmission<T>(receipt: AdmissionReceipt, work: () => Promise<T> | T): Promise<T> {
+@@ -214,8 +239,10 @@
+   }
+   if (type === 'tool/result') {
+     const authorization = dispatchAuthorizations.get(sessionId)
++    const capability = appendCapability.getStore()
+     const source = (data as { message?: { source?: { kind?: unknown, callId?: unknown } } }).message?.source
+-    if (authorization === undefined || source?.kind !== 'tool' || typeof source.callId !== 'string'
++    if (authorization === undefined || capability?.sessionId !== sessionId || capability.kind !== 'tool'
++      || source?.kind !== 'tool' || typeof source.callId !== 'string' || capability.toolCallId !== source.callId
+       || !authorization.expectedToolCalls.delete(source.callId)) throw new AdmissionDeniedError()
+     return
+   }
+@@ -223,7 +250,9 @@
+     // Assistant history is model-visible on the next step. It may originate
+     // only from the model dispatch that consumed this session's receipt.
+     const authorization = dispatchAuthorizations.get(sessionId)
+-    if (authorization === undefined || !authorization.assistantPending) throw new AdmissionDeniedError()
++    const capability = appendCapability.getStore()
++    if (authorization === undefined || capability?.sessionId !== sessionId || capability.kind !== 'assistant'
++      || !authorization.assistantPending) throw new AdmissionDeniedError()
+     authorization.assistantPending = false
+     const content = (data as { message?: { content?: unknown } }).message?.content
+     if (Array.isArray(content)) {
+@@ -255,7 +284,7 @@
+ }
+ 
+ /** Consume the exact receipt(s) that admitted content before llm.stream. */
+-export function consumeModelAdmission(sessionId: SessionId, messages: readonly unknown[]): readonly AdmissionReceipt[] {
++export function consumeModelAdmission(sessionId: SessionId, messages: readonly unknown[]): ModelAppendCapability {
+   const pending = pendingBySession.get(sessionId)
+   if (pending === undefined || pending.length === 0) throw new AdmissionDeniedError()
+   const contentDigests = new Set(messages
+@@ -266,6 +295,7 @@
+     throw new AdmissionDeniedError()
+   }
+   pendingBySession.delete(sessionId)
+-  dispatchAuthorizations.set(sessionId, { assistantPending: true, expectedToolCalls: new Set() })
+-  return pending
++  const capability = Object.freeze({ sessionId, [modelAppendMarker]: true as const })
++  dispatchAuthorizations.set(sessionId, { capability, assistantPending: true, expectedToolCalls: new Set() })
++  return capability
+ }
+--- a/packages/core/session/tests/openduck-admission.spec.ts	2026-08-19 20:51:33
++++ b/packages/core/session/tests/openduck-admission.spec.ts	2026-08-19 20:56:52
+@@ -7,6 +7,7 @@
+   consumeModelAdmission,
+   requireAdmission,
+   withAdmission,
++  withModelAppendCapability,
+   type CloudAdmissionProof,
+ } from '../src/openduck-admission.ts'
+ 
+@@ -32,8 +33,15 @@
+ await withAdmission(receipt, () => assertAppendAdmission('s-1' as never, 'agent/inbox/spliced', {
+   inserted: [{ content }],
+ }))
+-consumeModelAdmission('s-1' as never, [{ role: 'user', content }])
+-assertAppendAdmission('s-1' as never, 'assistant/message', { message: { content: [] } })
++const appendCapability = consumeModelAdmission('s-1' as never, [{ role: 'user', content }])
++// Barrier race: even while the model dispatch has authority, a plugin calling
++// the public Session.append seam first cannot steal it.
++let barrierDenied = false
++try { assertAppendAdmission('s-1' as never, 'assistant/message', { message: { content: [] } }) } catch (error) { barrierDenied = error instanceof AdmissionDeniedError }
++if (!barrierDenied) throw new Error('plugin stole pending assistant append authority')
++withModelAppendCapability(appendCapability, 'assistant', () => assertAppendAdmission('s-1' as never, 'assistant/message', {
++  message: { content: [{ type: 'tool-call', id: 'tool-1', name: 'test', arguments: '{}' }] },
++}))
+ for (const injected of [
+   () => assertAppendAdmission('s-1' as never, 'assistant/message', { message: { content: [] } }),
+   () => assertAppendAdmission('s-1' as never, 'tool/result', { message: { source: { kind: 'tool', callId: 'forged' } } }),
+@@ -42,6 +50,16 @@
+   try { injected() } catch (error) { denied = error instanceof AdmissionDeniedError }
+   if (!denied) throw new Error('replayed dispatch accepted an injected model-visible event')
+ }
++withModelAppendCapability(appendCapability, 'tool', () => assertAppendAdmission('s-1' as never, 'tool/result', {
++  message: { source: { kind: 'tool', callId: 'tool-1' } },
++}), 'tool-1')
++let replayedToolDenied = false
++try {
++  withModelAppendCapability(appendCapability, 'tool', () => assertAppendAdmission('s-1' as never, 'tool/result', {
++    message: { source: { kind: 'tool', callId: 'tool-1' } },
++  }), 'tool-1')
++} catch (error) { replayedToolDenied = error instanceof AdmissionDeniedError }
++if (!replayedToolDenied) throw new Error('model append capability replayed a tool result')
+ 
+ const foreignContent = [{ type: 'text', text: 'different admitted input' }]
+ const foreignTarget = admissionTarget('s-2', foreignContent, runtime)
+--- a/packages/core/agent-loop/src/agent.ts	2026-08-19 20:51:33
++++ b/packages/core/agent-loop/src/agent.ts	2026-08-19 20:56:30
+@@ -28,7 +28,7 @@
+ import type { Scope } from '@deepseek-ai/dsh-scope'
+ import { createScope } from '@deepseek-ai/dsh-scope'
+ import type { EpochHeader, RequestContext, Session, SessionId, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
+-import { canonicalHeader, consumeModelAdmission, headerEquals } from '@deepseek-ai/dsh-session'
++import { canonicalHeader, consumeModelAdmission, headerEquals, withModelAppendCapability } from '@deepseek-ai/dsh-session'
+ import { joinContextSections, renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
+ import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
+ import type { Context } from '@deepseek-ai/cordis'
+@@ -351,7 +351,7 @@
+       const chunkSeqs: number[] = []
+       // The receipt was bound by Session.append to the exact user-content
+       // digest. No model call proceeds unless this request contains it.
+-      consumeModelAdmission(this.session.id, request.messages)
++      const appendCapability = consumeModelAdmission(this.session.id, request.messages)
+       const gate = (this.loopCtx as Context & { openduckModelDispatchGate?: ModelDispatchGate }).openduckModelDispatchGate
+         ?? denyModelDispatch
+       await gate(request)
+@@ -391,7 +391,7 @@
+           ...assembler.replayState !== undefined ? { replayState: assembler.replayState } : {},
+         },
+       })
+-      this.session.append(
++      withModelAppendCapability(appendCapability, 'assistant', () => this.session.append(
+         'assistant/message',
+         {
+           turn,
+@@ -400,13 +400,13 @@
+           ...assembler.usage === undefined ? {} : { usage: assembler.usage },
+         },
+         { surfaceOp: 'append', sourceEventSeqs: chunkSeqs },
+-      )
++      ))
+       if (finish.kind === 'max-tokens') return { kind: 'max-tokens' }
+ 
+       const toolCalls = message.content.filter(block => block.type === 'tool-call')
+       if (toolCalls.length === 0) return { kind: 'completed' }
+       const { concluded } = await executeToolCalls(
+-        this.loopCtx, turn, step, toolCalls, signal,
++        this.loopCtx, turn, step, toolCalls, signal, appendCapability,
+         context => this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [context]),
+       )
+       return concluded ? { kind: 'completed' } : null
+--- a/packages/core/agent-loop/src/tool-calls.ts	2026-08-19 20:51:30
++++ b/packages/core/agent-loop/src/tool-calls.ts	2026-08-19 20:56:30
+@@ -13,7 +13,7 @@
+ 
+ import type { Context } from '@deepseek-ai/cordis'
+ import { assertNever, createToolResultMessage, type ToolCallBlock } from '@deepseek-ai/dsh-llm'
+-import type { Session, UserMessage } from '@deepseek-ai/dsh-session'
++import { withModelAppendCapability, type ModelAppendCapability, type Session, type UserMessage } from '@deepseek-ai/dsh-session'
+ import { TOOL_ABORTED_BEFORE_DISPATCH, TOOL_RUNTIME_SCHEDULER, type ToolExecutionInput, type ToolExecutionMode, type ToolExecutionResult, type ToolRunContext } from '@deepseek-ai/dsh-tools'
+ 
+ /** One tool call after argument parsing, ready to schedule. */
+@@ -62,6 +62,7 @@
+   step: number,
+   toolCalls: ToolCallBlock[],
+   signal: AbortSignal,
++  appendCapability: ModelAppendCapability,
+   acceptContext: (context: UserMessage) => void,
+ ): Promise<{ concluded: boolean }> {
+   const agent = ctx.agents.requireInitiator()
+@@ -88,12 +89,12 @@
+     const mode = ctx.tools.executionMode(first.exec).kind
+     const group = mode === 'parallel' ? planned.slice(next) : [first]
+     const outcome = await runGroup(
+-      ctx, turn, step, group, mode, signal, acceptContext,
++      ctx, turn, step, group, mode, signal, appendCapability, acceptContext,
+     )
+     next += outcome.consumed
+     concluded ||= outcome.concluded
+     if (outcome.aborted) {
+-      for (const call of planned.slice(next)) appendSkippedToolCall(session, turn, step, call.block)
++      for (const call of planned.slice(next)) appendSkippedToolCall(session, turn, step, call.block, appendCapability)
+       return { concluded }
+     }
+   }
+@@ -125,6 +126,7 @@
+   group: PlannedCall[],
+   mode: ToolExecutionMode['kind'],
+   signal: AbortSignal,
++  appendCapability: ModelAppendCapability,
+   acceptContext: (context: UserMessage) => void,
+ ): Promise<GroupOutcome> {
+   const { session } = ctx.agents.requireInitiator()
+@@ -152,7 +154,7 @@
+         ? await ctx.tools[TOOL_RUNTIME_SCHEDULER].finalize(slot.exec, slot.result)
+         : ctx.tools[TOOL_RUNTIME_SCHEDULER].finish(slot.exec, slot.result)
+       // oxlint-disable-next-line typescript/no-non-null-assertion -- bounded index
+-      appendToolResult(session, turn, step, call!.block, result, callSeqs[committed]!)
++      appendToolResult(session, turn, step, call!.block, result, callSeqs[committed]!, appendCapability)
+       for (const context of result.additionalContexts ?? []) acceptContext(context)
+       concluded ||= result.concludesTurn === true
+       committed++
+@@ -237,7 +239,7 @@
+   if (aborted) {
+     // Started calls and accepted context settle first; every remaining model
+     // call then receives an ordered synthetic result before the turn aborts.
+-    for (const call of group.slice(started)) appendSkippedToolCall(session, turn, step, call.block)
++    for (const call of group.slice(started)) appendSkippedToolCall(session, turn, step, call.block, appendCapability)
+     return { consumed: group.length, aborted: true, concluded }
+   }
+   /* v8 ignore next -- unreachable: a non-aborted group commits every started call */
+@@ -246,7 +248,7 @@
+ }
+ 
+ /** Append the durable call/result pair for a model call skipped after cancellation. */
+-function appendSkippedToolCall(session: Session, turn: number, step: number, block: ToolCallBlock): void {
++function appendSkippedToolCall(session: Session, turn: number, step: number, block: ToolCallBlock, appendCapability: ModelAppendCapability): void {
+   const callSeq = appendToolCall(session, turn, step, block)
+   appendToolResult(session, turn, step, block, {
+     content: [{ type: 'text', text: 'Error: tool call aborted before dispatch' }],
+@@ -255,7 +257,7 @@
+       message: 'tool call aborted before dispatch',
+       info: { name: 'AbortError', code: TOOL_ABORTED_BEFORE_DISPATCH },
+     },
+-  }, callSeq)
++  }, callSeq, appendCapability)
+ }
+ 
+ /** Append a started call and return the event seq that its result must cite. */
+@@ -272,18 +274,19 @@
+   block: ToolCallBlock,
+   result: ToolExecutionResult,
+   callSeq: number,
++  appendCapability: ModelAppendCapability,
+ ): void {
+   const message = createToolResultMessage({
+     callId: block.id,
+     content: result.content,
+     isError: result.isError,
+   })
+-  session.append('tool/result', {
++  withModelAppendCapability(appendCapability, 'tool', () => session.append('tool/result', {
+     turn, step,
+     message,
+     ...result.error?.info ? { error: result.error.info } : {},
+     // The tool's private presentation payload (e.g. a result-time diff),
+     // persisted so a UI bridge reproduces the card on replay.
+     ...result.meta !== undefined ? { meta: result.meta } : {},
+-  }, { surfaceOp: 'append', sourceEventSeqs: [callSeq] })
++  }, { surfaceOp: 'append', sourceEventSeqs: [callSeq] }), block.id)
+ }
+

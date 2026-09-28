@@ -1,0 +1,21 @@
+---
+- name: Assert typed ManifestV2 artifact and fixed-root contract
+  ansible.builtin.assert:
+    that:
+      - openduck_root == '/Library/Application Support/OpenDuck'
+      - openduck_release_artifacts is sequence
+      - openduck_release_artifacts | length > 0
+      - openduck_release_artifacts | length <= 256
+      - (openduck_release_artifacts | map(attribute='path') | list | unique | length) == (openduck_release_artifacts | length)
+      - >-
+        (openduck_release_artifacts |
+         selectattr('type', 'equalto', 'helper') |
+         selectattr('path', 'equalto', 'bin/openduck-installer') |
+         list | length) == 1
+    fail_msg: "OpenDuck release must provide bounded typed ManifestV2 artifacts and one canonical installer helper"
+  become: false
+
+- name: Record artifact deployment contract
+  ansible.builtin.set_fact:
+    artifacts_validated: true
+  become: false

@@ -1,0 +1,26 @@
+--- a/packages/core/agent-loop/src/agent.ts	2026-08-19 19:17:17.814787115 +0300
++++ b/packages/core/agent-loop/src/agent.ts	2026-08-19 20:12:19.051465246 +0300
+@@ -51,6 +51,13 @@
+   | { kind: 'reject' }
+   | { kind: 'enter'; messages: UserMessage[]; assembly: PromptAssembly }
+ 
++/** Controller-owned final model egress gate; absent composition is deny-all. */
++export type ModelDispatchGate = (request: GenerateOptions) => Promise<void> | void
++
++const denyModelDispatch: ModelDispatchGate = () => {
++  throw new Error('raw model dispatch is disabled; Controller admission is required')
++}
++
+ /** Remove adapter-derived values before plugins propose the next request config. */
+ function requestProposal(header: EpochHeader): LlmCallConfig {
+   if (header.adapterDefaults === undefined) return header.config
+@@ -342,6 +349,9 @@
+       )
+       const assembler = new BlockAssembler()
+       const chunkSeqs: number[] = []
++      const gate = (this.loopCtx as Context & { openduckModelDispatchGate?: ModelDispatchGate }).openduckModelDispatchGate
++        ?? denyModelDispatch
++      await gate(request)
+       const stream = preparedCall?.stream(request) ?? this.loopCtx.llm.stream(request)
+       signal.throwIfAborted()
+       for await (const chunk of stream) {

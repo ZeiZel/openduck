@@ -1,0 +1,15 @@
+{
+  "name": "openduck-mesh",
+  "version": "0.1.0",
+  "description": "Disabled metadata-only OpenDuck mesh fixture.",
+  "author": { "name": "OpenDuck" },
+  "interface": {
+    "displayName": "OpenDuck Mesh",
+    "shortDescription": "Disabled mesh fixture",
+    "longDescription": "Metadata-only fixture; Controller lifecycle approval is required.",
+    "developerName": "OpenDuck",
+    "category": "Developer Tools",
+    "capabilities": [],
+    "defaultPrompt": []
+  }
+}

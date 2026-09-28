@@ -1,0 +1,135 @@
+---
+- name: Roll back OpenDuck to the fixed previous release
+  hosts: localhost
+  gather_facts: true
+  vars:
+    openduck_root: "/Library/Application Support/OpenDuck"
+    openduck_installer_name: "openduck-installer"
+    release_operation: "rollback"
+    release_activation: false
+  tasks:
+    - name: Require explicit rollback inputs
+      ansible.builtin.assert:
+        that:
+          - release_digest is match('^[0-9a-f]{64}$')
+          - staged_source is match('^/')
+      tags: [always, rollback]
+      become: false
+    - name: Reject overridden fixed rollback contract
+      ansible.builtin.assert:
+        that:
+          - openduck_root == '/Library/Application Support/OpenDuck'
+          - openduck_installer_name == 'openduck-installer'
+      tags: [always, rollback]
+      become: false
+    - name: Load shared preflight contract
+      ansible.builtin.include_role:
+        name: preflight
+      tags: [always, rollback]
+    - name: Load and validate staged manifest contract
+      ansible.builtin.include_role:
+        name: stage
+      tags: [always, rollback]
+    - name: Publish stage contract to the rollback play
+      ansible.builtin.set_fact:
+        release_id: "{{ stage_release_id }}"
+        release_version: "{{ stage_release_version }}"
+        release_digest: "{{ stage_release_digest }}"
+        release_run_id: "{{ stage_release_run_id }}"
+        release_operation: "{{ stage_release_operation }}"
+        release_activation: "{{ stage_release_activation }}"
+        openduck_activate: "{{ stage_activate }}"
+        release_envelope: "{{ stage_release_envelope }}"
+        release_manifest: "{{ stage_release_manifest }}"
+        release_trust_bundle: "{{ stage_release_trust_bundle }}"
+        release_nonce_store: "{{ stage_release_nonce_store }}"
+        openduck_release_envelope_path: "{{ stage_release_envelope_path }}"
+        openduck_release_manifest_path: "{{ stage_release_manifest_path }}"
+        openduck_release_trust_bundle_path: "{{ stage_release_trust_bundle_path }}"
+        openduck_release_nonce_store_path: "{{ stage_release_nonce_store_path }}"
+        openduck_release_artifacts: "{{ stage_release_artifacts }}"
+        openduck_artifact_set_digest: "{{ stage_artifact_set_digest }}"
+        canonical_artifact_set_digest: "{{ stage_canonical_artifact_set_digest }}"
+      no_log: true
+      tags: [always, rollback]
+      become: false
+    - name: Select one trusted rollback helper authority
+      ansible.builtin.include_role:
+        name: trusted_helper
+      tags: [always, rollback, trusted_helper]
+    - name: Initialize rollback run identity
+      ansible.builtin.set_fact:
+        rollback_effective_run_id: "{{ release_run_id }}"
+      tags: [always, rollback]
+      become: false
+    - name: Allocate random root-owned rollback handoff directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /private/var/run
+        prefix: openduck-ansible-
+      register: rollback_run_tempdir
+      check_mode: false
+      no_log: true
+      tags: [always, rollback]
+      become: true
+      when: not ansible_check_mode
+    - name: Bind random rollback handoff separately from signed run ID
+      ansible.builtin.set_fact:
+        rollback_run_handoff:
+          path: "{{ rollback_run_tempdir.path }}"
+      no_log: true
+      tags: [always, rollback]
+      become: false
+      when: not ansible_check_mode
+    - name: Inspect newly allocated rollback handoff without following links
+      ansible.builtin.stat:
+        path: "{{ rollback_run_handoff.path }}"
+        follow: false
+      register: rollback_run_dir_initial_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      tags: [always, rollback]
+      become: true
+      when: not ansible_check_mode
+    - name: Validate rollback run identity
+      ansible.builtin.assert:
+        that:
+          - rollback_effective_run_id is match('^[0-9a-f-]{8,128}$')
+          - >-
+            ansible_check_mode or
+            (rollback_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$') and
+             '..' not in rollback_run_handoff.path)
+          - >-
+            ansible_check_mode or
+            (rollback_run_dir_initial_stat.stat.isdir | default(false) and
+             not (rollback_run_dir_initial_stat.stat.islnk | default(false)) and
+             (rollback_run_dir_initial_stat.stat.uid | default(-1) | int) == 0 and
+             (rollback_run_dir_initial_stat.stat.gid | default(-1) | int) == 0 and
+             rollback_run_dir_initial_stat.stat.gr_name | default('') == 'wheel' and
+             rollback_run_dir_initial_stat.stat.mode | default('') == '0700')
+      tags: [always, rollback]
+      become: false
+    - name: Execute explicit rollback interface
+      ansible.builtin.include_role:
+        name: rollback
+      vars:
+        rollback_requested: true
+      tags: [rollback]
+      when: not ansible_check_mode
+    - name: Require rollback completion
+      ansible.builtin.assert:
+        that:
+          - rollback_performed | default(false) | bool
+        fail_msg: >-
+          rollback was not completed: previous.release is unavailable or the
+          trusted rollback helper failed; inspect diagnostics
+      tags: [rollback]
+      become: false
+      when: not ansible_check_mode
+    - name: Report read-only rollback check mode
+      ansible.builtin.debug:
+        msg: "check mode: rollback mutation and temporary handoff allocation skipped"
+      tags: [rollback]
+      become: false
+      when: ansible_check_mode

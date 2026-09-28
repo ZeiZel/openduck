@@ -1,0 +1,48 @@
+# Synthetic DR-018 overlay. DSH remains a browser shell with no model route.
+- id: agent-default-model
+  disabled: true
+- id: agent
+  disabled: true
+- id: llm
+  disabled: true
+- id: llm-pi-ai
+  disabled: true
+- id: llm-retry
+  disabled: true
+- id: session-title
+  disabled: true
+- id: session-title-llm
+  disabled: true
+- id: session-persistence-jsonl
+  disabled: true
+- id: session-query-sqlite
+  disabled: true
+- id: session-telemetry-otel
+  disabled: true
+- id: credentials
+  disabled: true
+- id: attachment-local
+  disabled: true
+- id: ui-conversation
+  disabled: true
+- id: ui-model-selection
+  disabled: true
+- id: ui-settings-models
+  disabled: true
+- id: ui-subagent
+  disabled: true
+- id: ui-trajectory
+  disabled: true
+
+# OpenDuck adapters remain disabled until authenticated Controller read routes
+# and the same-origin client bridge are composed and reviewed.
+- insert:
+    - id: openduck-beads-memory-explorer
+      name: '@openduck/beads-memory-explorer'
+      disabled: true
+    - id: openduck-workspace-groups
+      name: '@openduck/workspace-groups'
+      disabled: true
+    - id: openduck-controller-read-bridge
+      name: '@openduck/controller-read-bridge'
+      disabled: true

@@ -1,0 +1,7 @@
+---
+profile: min
+skip_list:
+  - var-naming[no-role-prefix]
+  - name[missing]
+  - key-order
+  - yaml[line-length]

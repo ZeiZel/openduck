@@ -1,0 +1,12 @@
+---
+# This role is an explicit one-time owner ceremony. It is never included by
+# site.yml: release apply must not bootstrap its own trust authority.
+release_trust_anchor_action: "bootstrap"
+release_trust_anchor_path: "/Library/Application Support/OpenDuck.release-trust.v1.json"
+release_trust_anchor_source: ""
+release_trust_anchor_sha256: ""
+
+# This executable is independently provisioned and verified, never taken
+# from staged release contents.
+release_trust_anchor_bootstrap_helper_path: ""
+release_trust_anchor_bootstrap_helper_sha256: ""

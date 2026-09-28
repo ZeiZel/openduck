@@ -1,0 +1,7 @@
+(version 1)
+(deny default)
+(import "system.sb")
+(allow process*)
+(allow file-read* (subpath "/System") (subpath "/usr") (subpath "/Library/Apple"))
+(allow file-read* (subpath "/Library/Application Support/OpenDuck"))
+(allow network-outbound)

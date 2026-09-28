@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openduck.local/schemas/local-pd/contracts.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "x-openduck-authority": "go-validate-required",
+  "$defs": {
+    "digest": {"type":"string","pattern":"^sha256:[0-9a-f]{64}$"},
+    "time": {"type":"string","format":"date-time","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "id": {"type":"string","pattern":"^[A-Za-z0-9_.:/-]{1,512}$"},
+    "list": {"type":"array","minItems":1,"maxItems":64,"uniqueItems":true,"items":{"$ref":"#/$defs/id"}},
+    "optional_list": {"type":"array","maxItems":64,"uniqueItems":true,"items":{"$ref":"#/$defs/id"}},
+    "gate": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","gate_id","state","state_version","high_water","source_cursor_digest","policy_digest","controller_attestation_digest","nonce","issued_at","expires_at","digest","conversation_scope","source_sequence","source_version","ingest_ordinal","scanned_through","prior_complete","chain_head_digest","gap_ranges","pending_parts","mode","policy_version","policy_updated_at","controller_signature"],
+      "properties": {
+        "schema_version":{"const":"ingress-gate-state.v1"},"gate_id":{"$ref":"#/$defs/id"},"state":{"enum":["open","quarantine","local_only","closed"]},"state_version":{"type":"integer","minimum":1},"high_water":{"type":"integer","minimum":1},"source_cursor_digest":{"$ref":"#/$defs/digest"},"policy_digest":{"$ref":"#/$defs/digest"},"controller_attestation_digest":{"$ref":"#/$defs/digest"},"nonce":{"$ref":"#/$defs/id"},"issued_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"digest":{"$ref":"#/$defs/digest"},"conversation_scope":{"$ref":"#/$defs/id"},"source_sequence":{"type":"integer","minimum":1},"source_version":{"type":"integer","minimum":1},"ingest_ordinal":{"type":"integer","minimum":1},"scanned_through":{"type":"integer","minimum":1},"prior_complete":{"type":"boolean"},"chain_head_digest":{"$ref":"#/$defs/digest"},"gap_ranges":{"$ref":"#/$defs/optional_list"},"pending_parts":{"$ref":"#/$defs/optional_list"},"mode":{"enum":["normal","pd","quarantine","closed"]},"policy_version":{"$ref":"#/$defs/id"},"policy_updated_at":{"$ref":"#/$defs/time"},"controller_signature":{"$ref":"#/$defs/digest"}
+      },
+      "allOf":[
+        {"if":{"properties":{"mode":{"const":"normal"}},"required":["mode"]},"then":{"properties":{"state":{"const":"open"},"prior_complete":{"const":true},"gap_ranges":{"maxItems":0},"pending_parts":{"maxItems":0}}}},
+        {"if":{"properties":{"mode":{"const":"pd"}},"required":["mode"]},"then":{"properties":{"state":{"const":"local_only"}}}},
+        {"if":{"properties":{"mode":{"const":"quarantine"}},"required":["mode"]},"then":{"properties":{"state":{"const":"quarantine"}}}},
+        {"if":{"properties":{"mode":{"const":"closed"}},"required":["mode"]},"then":{"properties":{"state":{"const":"closed"}}}}
+      ]
+    },
+    "binding": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","session_id","binding_version","high_water","ingress_gate_digest","local_pd_view_digest","qwen_runtime_digest","qwen_config_digest","nonce","issued_at","expires_at","controller_signature","digest","conversation_scope","source_sequence","source_version","class_high_water","class_high_water_version","sticky"],
+      "properties": {
+        "schema_version":{"const":"pd-session-binding.v1"},"session_id":{"$ref":"#/$defs/id"},"binding_version":{"type":"integer","minimum":1},"high_water":{"type":"integer","minimum":1},"ingress_gate_digest":{"$ref":"#/$defs/digest"},"local_pd_view_digest":{"$ref":"#/$defs/digest"},"qwen_runtime_digest":{"$ref":"#/$defs/digest"},"qwen_config_digest":{"$ref":"#/$defs/digest"},"nonce":{"$ref":"#/$defs/id"},"issued_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"controller_signature":{"$ref":"#/$defs/digest"},"digest":{"$ref":"#/$defs/digest"},"conversation_scope":{"$ref":"#/$defs/id"},"source_sequence":{"type":"integer","minimum":1},"source_version":{"type":"integer","minimum":1},"class_high_water":{"enum":["L2","L3"]},"class_high_water_version":{"type":"integer","minimum":1},"sticky":{"const":true}
+      }
+    },
+    "view": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","view_id","binding_version","high_water","source_version","source_digest","redaction_digest","allowed_fields","issued_at","expires_at","nonce","digest","controller_signature"],
+      "properties": {"schema_version":{"const":"local-pd-view-binding.v1"},"view_id":{"$ref":"#/$defs/id"},"binding_version":{"type":"integer","minimum":1},"high_water":{"type":"integer","minimum":1},"source_version":{"type":"integer","minimum":1},"source_digest":{"$ref":"#/$defs/digest"},"redaction_digest":{"$ref":"#/$defs/digest"},"allowed_fields":{"$ref":"#/$defs/list"},"issued_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"nonce":{"$ref":"#/$defs/id"},"digest":{"$ref":"#/$defs/digest"},"controller_signature":{"$ref":"#/$defs/digest"}}
+    },
+    "runtime": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","runtime_id","process_digest","binary_digest","model","endpoint_digest","network_policy","tools_policy","attested_at","expires_at","nonce","digest","controller_signature"],
+      "properties": {"schema_version":{"const":"qwen-runtime-attestation.v1"},"runtime_id":{"$ref":"#/$defs/id"},"process_digest":{"$ref":"#/$defs/digest"},"binary_digest":{"$ref":"#/$defs/digest"},"model":{"type":"string","pattern":"^[Qq][Ww][Ee][Nn][A-Za-z0-9_.:/-]{0,508}$"},"endpoint_digest":{"$ref":"#/$defs/digest"},"network_policy":{"const":"none"},"tools_policy":{"const":"none"},"attested_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"nonce":{"$ref":"#/$defs/id"},"digest":{"$ref":"#/$defs/digest"},"controller_signature":{"$ref":"#/$defs/digest"}}
+    },
+    "config": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","config_id","config_digest","model","num_ctx","context_tokens","thinking","network_policy","tools_policy","config_version","issued_at","expires_at","nonce","digest","controller_signature"],
+      "properties": {"schema_version":{"const":"qwen-config-attestation.v1"},"config_id":{"$ref":"#/$defs/id"},"config_digest":{"$ref":"#/$defs/digest"},"model":{"type":"string","pattern":"^[Qq][Ww][Ee][Nn][A-Za-z0-9_.:/-]{0,508}$"},"num_ctx":{"type":"integer","minimum":1},"context_tokens":{"type":"integer","minimum":1},"thinking":{"enum":["disabled","low","medium","high"]},"network_policy":{"const":"none"},"tools_policy":{"const":"none"},"config_version":{"type":"integer","minimum":1},"issued_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"nonce":{"$ref":"#/$defs/id"},"digest":{"$ref":"#/$defs/digest"},"controller_signature":{"$ref":"#/$defs/digest"}}
+    },
+    "provenance": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","provenance_id","source_kind","source_account_digest","container_digest","event_digest","capture_revision","high_water","source_version","observed_at","expires_at","controller_attestation_digest","digest","controller_signature"],
+      "properties": {"schema_version":{"const":"native-input-provenance.v1"},"provenance_id":{"$ref":"#/$defs/id"},"source_kind":{"type":"string","pattern":"^[a-z][a-z0-9_.-]{0,63}$"},"source_account_digest":{"$ref":"#/$defs/digest"},"container_digest":{"$ref":"#/$defs/digest"},"event_digest":{"$ref":"#/$defs/digest"},"capture_revision":{"type":"integer","minimum":1},"high_water":{"type":"integer","minimum":1},"source_version":{"type":"integer","minimum":1},"observed_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"controller_attestation_digest":{"$ref":"#/$defs/digest"},"digest":{"$ref":"#/$defs/digest"},"controller_signature":{"$ref":"#/$defs/digest"}}
+    },
+    "decision": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","decision_id","session_binding_digest","from_class","target_class","decision","allowed_fields","rationale_digest","policy_digest","issued_at","expires_at","nonce","controller_signature","digest","input_digest","candidate_digest","released_digest","source_origin","candidate_origin","postscan_attestation_digest","destination_route","provider_digest","auth_context_digest","retention_policy_digest","purpose_digest","approver_id","recent_auth_proof_digest","recent_auth_at","requested_at","approved_at","lifecycle_state","max_uses","use_nonce","cas_binding_digest"],
+      "properties": {"schema_version":{"const":"declassification-decision.v1"},"decision_id":{"$ref":"#/$defs/id"},"session_binding_digest":{"$ref":"#/$defs/digest"},"from_class":{"enum":["L2","L3"]},"target_class":{"const":"L0"},"decision":{"const":"allow"},"allowed_fields":{"$ref":"#/$defs/list"},"rationale_digest":{"$ref":"#/$defs/digest"},"policy_digest":{"$ref":"#/$defs/digest"},"issued_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"nonce":{"$ref":"#/$defs/id"},"controller_signature":{"$ref":"#/$defs/digest"},"digest":{"$ref":"#/$defs/digest"},"input_digest":{"$ref":"#/$defs/digest"},"candidate_digest":{"$ref":"#/$defs/digest"},"released_digest":{"$ref":"#/$defs/digest"},"source_origin":{"const":"owner_manual_blank_editor"},"candidate_origin":{"const":"owner_manual_blank_editor"},"postscan_attestation_digest":{"$ref":"#/$defs/digest"},"destination_route":{"$ref":"#/$defs/id"},"provider_digest":{"$ref":"#/$defs/digest"},"auth_context_digest":{"$ref":"#/$defs/digest"},"retention_policy_digest":{"$ref":"#/$defs/digest"},"purpose_digest":{"$ref":"#/$defs/digest"},"approver_id":{"$ref":"#/$defs/id"},"recent_auth_proof_digest":{"$ref":"#/$defs/digest"},"recent_auth_at":{"$ref":"#/$defs/time"},"requested_at":{"$ref":"#/$defs/time"},"approved_at":{"$ref":"#/$defs/time"},"lifecycle_state":{"const":"approved"},"max_uses":{"const":1},"use_nonce":{"$ref":"#/$defs/id"},"cas_binding_digest":{"$ref":"#/$defs/digest"}}
+    },
+    "erasure": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","receipt_id","session_binding_digest","target_digest","erasure_scope","erasure_version","high_water","observed_target_version","observed_target_high_water","deleted_through_high_water","deletion_status","verification_method","coverage_complete","erased_at","expires_at","deletion_evidence_digest","coverage_digest","verification_digest","controller_signature","digest"],
+      "properties": {"schema_version":{"const":"erasure-receipt.v1"},"receipt_id":{"$ref":"#/$defs/id"},"session_binding_digest":{"$ref":"#/$defs/digest"},"target_digest":{"$ref":"#/$defs/digest"},"erasure_scope":{"enum":["view","payload"]},"erasure_version":{"type":"integer","minimum":1},"high_water":{"type":"integer","minimum":1},"observed_target_version":{"type":"integer","minimum":1},"observed_target_high_water":{"type":"integer","minimum":1},"deleted_through_high_water":{"type":"integer","minimum":1},"deletion_status":{"const":"deleted"},"verification_method":{"const":"authoritative_store_absence"},"coverage_complete":{"const":true},"erased_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"deletion_evidence_digest":{"$ref":"#/$defs/digest"},"coverage_digest":{"$ref":"#/$defs/digest"},"verification_digest":{"$ref":"#/$defs/digest"},"controller_signature":{"$ref":"#/$defs/digest"},"digest":{"$ref":"#/$defs/digest"}}
+    },
+    "postscan": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","attestation_id","released_digest","policy_digest","scanner_digest","policy_version","scanner_version","max_class","matched_rule_ids","decision","issued_at","expires_at","nonce","controller_signature","digest"],
+      "properties":{"schema_version":{"const":"postscan-attestation.v1"},"attestation_id":{"$ref":"#/$defs/id"},"released_digest":{"$ref":"#/$defs/digest"},"policy_digest":{"$ref":"#/$defs/digest"},"scanner_digest":{"$ref":"#/$defs/digest"},"policy_version":{"type":"integer","minimum":1},"scanner_version":{"type":"integer","minimum":1},"max_class":{"const":"L0"},"matched_rule_ids":{"$ref":"#/$defs/optional_list"},"decision":{"const":"allow"},"issued_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"nonce":{"$ref":"#/$defs/id"},"controller_signature":{"$ref":"#/$defs/digest"},"digest":{"$ref":"#/$defs/digest"}}
+    },
+    "reconciliation": {
+      "type":"object","additionalProperties":false,
+      "x-openduck-authority":"go-validate-required",
+      "required":["schema_version","reconciliation_id","gate_id","prior_quarantine_digest","next_gate_digest","complete_coverage_digest","gap_closure_digest","high_water","policy_digest","policy_version","target_mode","complete_coverage","gaps_closed","issued_at","expires_at","nonce","controller_signature","digest"],
+      "properties":{"schema_version":{"const":"reconciliation-binding.v1"},"reconciliation_id":{"$ref":"#/$defs/id"},"gate_id":{"$ref":"#/$defs/id"},"prior_quarantine_digest":{"$ref":"#/$defs/digest"},"next_gate_digest":{"$ref":"#/$defs/digest"},"complete_coverage_digest":{"$ref":"#/$defs/digest"},"gap_closure_digest":{"$ref":"#/$defs/digest"},"high_water":{"type":"integer","minimum":1},"policy_digest":{"$ref":"#/$defs/digest"},"policy_version":{"$ref":"#/$defs/id"},"target_mode":{"const":"pd"},"complete_coverage":{"const":true},"gaps_closed":{"const":true},"issued_at":{"$ref":"#/$defs/time"},"expires_at":{"$ref":"#/$defs/time"},"nonce":{"$ref":"#/$defs/id"},"controller_signature":{"$ref":"#/$defs/digest"},"digest":{"$ref":"#/$defs/digest"}}
+    }
+  }
+}

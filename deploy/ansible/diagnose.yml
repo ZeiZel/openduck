@@ -1,0 +1,255 @@
+---
+# Strictly read-only standalone doctor.  It never repairs, activates, logs in,
+# touches PF, or uses a network.  Raw helper output/results are always no_log.
+- name: Diagnose OpenDuck macOS boundary
+  hosts: localhost
+  gather_facts: false
+  become: false
+  vars:
+    openduck_root: "/Library/Application Support/OpenDuck"
+    openduck_readiness_path: "/Library/Application Support/OpenDuck/.openduck-readiness"
+    openduck_provider_attestor_path: "/Library/Application Support/OpenDuck/.openduck-provider-attestor"
+    openduck_native_mcp_path: "/Library/Application Support/OpenDuck/.openduck-native-mcp"
+  tasks:
+    - name: Require non-overridable diagnostic paths
+      ansible.builtin.assert:
+        that:
+          - openduck_root == '/Library/Application Support/OpenDuck'
+          - openduck_readiness_path == '/Library/Application Support/OpenDuck/.openduck-readiness'
+          - openduck_provider_attestor_path == '/Library/Application Support/OpenDuck/.openduck-provider-attestor'
+          - openduck_native_mcp_path == '/Library/Application Support/OpenDuck/.openduck-native-mcp'
+      become: false
+
+    - name: Inspect fixed root for explicit recovery triage without following links
+      ansible.builtin.stat:
+        path: "{{ openduck_root }}"
+        follow: false
+      register: openduck_doctor_root_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Emit bounded partial-install recovery triage state
+      ansible.builtin.debug:
+        msg:
+          schema: openduck.partial-install-recovery.v1
+          state: manual_explicit_action_required
+          fixed_root_present: "{{ openduck_doctor_root_stat.stat.exists | default(false) | bool }}"
+      changed_when: false
+      become: false
+
+    - name: Inspect configured release selector without following links
+      ansible.builtin.stat:
+        path: "{{ openduck_root }}/configured.release"
+        follow: false
+      register: openduck_doctor_configured_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Read configured release selector only after metadata inspection
+      ansible.builtin.slurp:
+        src: "{{ openduck_root }}/configured.release"
+      register: openduck_doctor_configured_raw
+      no_log: true
+      become: true
+      when:
+        - openduck_doctor_configured_stat.stat.isreg | default(false)
+        - not (openduck_doctor_configured_stat.stat.islnk | default(false))
+        - (openduck_doctor_configured_stat.stat.nlink | default(0) | int) == 1
+        - (openduck_doctor_configured_stat.stat.uid | default(-1) | int) == 0
+        - (openduck_doctor_configured_stat.stat.gid | default(-1) | int) == 0
+        - openduck_doctor_configured_stat.stat.gr_name | default('') == 'wheel'
+        - openduck_doctor_configured_stat.stat.mode | default('') == '0644'
+
+    - name: Project bounded configured release identifier
+      ansible.builtin.set_fact:
+        openduck_doctor_release_id: "{{ openduck_doctor_configured_raw.content | default('') | b64decode | trim }}"
+      no_log: true
+      become: false
+      when: openduck_doctor_configured_raw is defined
+
+    - name: Inspect admitted ManifestV2 without following links
+      ansible.builtin.stat:
+        path: "{{ openduck_root }}/releases/controller/{{ openduck_doctor_release_id }}/release-manifest.v2.json"
+        follow: false
+      register: openduck_doctor_manifest_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+      when: openduck_doctor_release_id | default('') is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$')
+
+    - name: Read admitted ManifestV2 only after metadata inspection
+      ansible.builtin.slurp:
+        src: "{{ openduck_root }}/releases/controller/{{ openduck_doctor_release_id }}/release-manifest.v2.json"
+      register: openduck_doctor_manifest_raw
+      no_log: true
+      become: true
+      when:
+        - openduck_doctor_manifest_stat is defined
+        - openduck_doctor_manifest_stat.stat.isreg | default(false)
+        - not (openduck_doctor_manifest_stat.stat.islnk | default(false))
+        - (openduck_doctor_manifest_stat.stat.nlink | default(0) | int) == 1
+        - (openduck_doctor_manifest_stat.stat.uid | default(-1) | int) == 0
+        - (openduck_doctor_manifest_stat.stat.gid | default(-1) | int) == 0
+        - openduck_doctor_manifest_stat.stat.gr_name | default('') == 'wheel'
+        - openduck_doctor_manifest_stat.stat.mode | default('') == '0440'
+        - (openduck_doctor_manifest_stat.stat.size | default(1048577) | int) > 1
+        - (openduck_doctor_manifest_stat.stat.size | default(1048577) | int) <= 1048576
+
+    - name: Extract admitted readiness digest without raw manifest exposure
+      ansible.builtin.set_fact:
+        openduck_doctor_readiness_digest: >-
+          {{ openduck_doctor_manifest_raw.content | default('') | b64decode |
+             openduck_installed_manifest_artifact_digest_or_empty(
+               openduck_doctor_release_id | default(''), 'bin/openduck-readiness') }}
+      no_log: true
+      become: false
+      when: openduck_doctor_manifest_raw is defined
+
+    - name: Extract admitted provider attestor digest without raw manifest exposure
+      ansible.builtin.set_fact:
+        openduck_doctor_attestor_digest: >-
+          {{ openduck_doctor_manifest_raw.content | default('') | b64decode |
+             openduck_installed_manifest_artifact_digest_or_empty(
+               openduck_doctor_release_id | default(''), 'bin/openduck-provider-attestor') }}
+      no_log: true
+      become: false
+      when: openduck_doctor_manifest_raw is defined
+
+    - name: Extract admitted native MCP shim digest without raw manifest exposure
+      ansible.builtin.set_fact:
+        openduck_doctor_native_mcp_digest: >-
+          {{ openduck_doctor_manifest_raw.content | default('') | b64decode |
+             openduck_installed_manifest_artifact_digest_or_empty(
+               openduck_doctor_release_id | default(''), 'bin/openduck-native-mcp') }}
+      no_log: true
+      become: false
+      when: openduck_doctor_manifest_raw is defined
+
+    - name: Inspect installed native MCP shim without following links
+      ansible.builtin.stat:
+        path: "{{ openduck_native_mcp_path }}"
+        follow: false
+        checksum_algorithm: sha256
+      register: openduck_doctor_native_mcp
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Record bounded native MCP shim posture
+      ansible.builtin.set_fact:
+        openduck_doctor_native_mcp_safe: >-
+          {{ openduck_doctor_native_mcp.stat.isreg | default(false) and
+             not (openduck_doctor_native_mcp.stat.islnk | default(false)) and
+             (openduck_doctor_native_mcp.stat.nlink | default(0) | int) == 1 and
+             (openduck_doctor_native_mcp.stat.uid | default(-1) | int) == 0 and
+             (openduck_doctor_native_mcp.stat.gid | default(-1) | int) == 0 and
+             openduck_doctor_native_mcp.stat.gr_name | default('') == 'wheel' and
+             openduck_doctor_native_mcp.stat.mode | default('') == '0755' and
+             openduck_doctor_native_mcp_digest | default('') is match('^[0-9a-f]{64}$') and
+             openduck_doctor_native_mcp.stat.checksum == openduck_doctor_native_mcp_digest }}
+      no_log: true
+      become: false
+
+    - name: Inspect installed provider attestor without following links
+      ansible.builtin.stat:
+        path: "{{ openduck_provider_attestor_path }}"
+        follow: false
+        checksum_algorithm: sha256
+      register: openduck_doctor_attestor
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Record bounded provider attestor posture
+      ansible.builtin.set_fact:
+        openduck_doctor_attestor_safe: >-
+          {{ openduck_doctor_attestor.stat.isreg | default(false) and
+             not (openduck_doctor_attestor.stat.islnk | default(false)) and
+             (openduck_doctor_attestor.stat.nlink | default(0) | int) == 1 and
+             (openduck_doctor_attestor.stat.uid | default(-1) | int) == 0 and
+             (openduck_doctor_attestor.stat.gid | default(-1) | int) == 0 and
+             openduck_doctor_attestor.stat.gr_name | default('') == 'wheel' and
+             openduck_doctor_attestor.stat.mode | default('') == '0700' and
+             openduck_doctor_attestor_digest | default('') is match('^[0-9a-f]{64}$') and
+             openduck_doctor_attestor.stat.checksum == openduck_doctor_attestor_digest }}
+      no_log: true
+      become: false
+
+    - name: Inspect installed doctor helper without following links
+      ansible.builtin.stat:
+        path: "{{ openduck_readiness_path }}"
+        follow: false
+        checksum_algorithm: sha256
+      register: openduck_doctor_helper
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Record whether doctor execution is safely bound
+      ansible.builtin.set_fact:
+        openduck_doctor_safe: >-
+          {{ openduck_doctor_helper.stat.isreg | default(false) and
+             not (openduck_doctor_helper.stat.islnk | default(false)) and
+             (openduck_doctor_helper.stat.nlink | default(0) | int) == 1 and
+             (openduck_doctor_helper.stat.uid | default(-1) | int) == 0 and
+             (openduck_doctor_helper.stat.gid | default(-1) | int) == 0 and
+             openduck_doctor_helper.stat.gr_name | default('') == 'wheel' and
+             openduck_doctor_helper.stat.mode | default('') == '0700' and
+             openduck_doctor_readiness_digest | default('') is match('^[0-9a-f]{64}$') and
+             openduck_doctor_helper.stat.checksum == openduck_doctor_readiness_digest }}
+      no_log: true
+      become: false
+
+    - name: Run bounded doctor JSON only from a verified installed helper
+      ansible.builtin.command:
+        argv:
+          - "{{ openduck_readiness_path }}"
+          - --doctor-json
+      register: openduck_doctor_result
+      changed_when: false
+      no_log: true
+      become: true
+      when: openduck_doctor_safe | bool
+
+    - name: Project doctor JSON without raw output exposure
+      ansible.builtin.set_fact:
+        openduck_doctor_projection: "{{ openduck_doctor_result.stdout | default('') | openduck_doctor_v1 }}"
+      no_log: true
+      become: false
+      when: openduck_doctor_safe | bool
+
+    - name: Emit bounded unavailable doctor state
+      ansible.builtin.debug:
+        msg:
+          schema: openduck.doctor.v1
+          state: unavailable
+          reason: installed_readiness_helper_or_manifest_unsafe
+      become: false
+      when: not (openduck_doctor_safe | bool)
+
+    - name: Emit allowlisted doctor posture
+      ansible.builtin.debug:
+        msg: "{{ openduck_doctor_projection }}"
+      become: false
+      when:
+        - openduck_doctor_safe | bool
+        - openduck_doctor_projection.available | default(false) | bool
+
+    - name: Emit bounded unavailable doctor projection
+      ansible.builtin.debug:
+        msg:
+          schema: openduck.doctor.v1
+          state: unavailable
+          reason: invalid_doctor_projection
+      become: false
+      when:
+        - openduck_doctor_safe | bool
+        - not (openduck_doctor_projection.available | default(false) | bool)

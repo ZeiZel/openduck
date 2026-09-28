@@ -1,0 +1,21 @@
+---
+- name: Verify this is macOS
+  ansible.builtin.assert:
+    that:
+      - ansible_system == preflight_platform
+    fail_msg: "The OpenDuck boundary playbook is macOS-only"
+  become: false
+
+- name: Verify Ansible is in check mode contract
+  ansible.builtin.assert:
+    that: ansible_version.full is version('2.14', '>=')
+  become: false
+
+- name: Create restrictive local log directory
+  ansible.builtin.file:
+    path: "{{ preflight_log_dir }}"
+    state: directory
+    mode: '0700'
+    owner: "{{ lookup('env', 'USER') | default('root', true) }}"
+  become: false
+  no_log: true

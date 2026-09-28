@@ -1,0 +1,14 @@
+---
+# Copy privately and supply paths for one signed ReleaseEnvelope deployment.
+release_id: "release-20260826"
+release_version: "1.2.3"
+release_digest: ""
+release_run_id: ""
+release_activation: false
+release_envelope: "/absolute/path/release-envelope.json"
+release_manifest: "/absolute/path/release.manifest.v2.json"
+release_trust_bundle: "/absolute/path/release-trust.json"
+staged_source: "/absolute/path/release-stage"
+# Fresh bootstrap only; independent of the staged release and ManifestV2.
+openduck_bootstrap_helper_path: "/absolute/path/pretrusted/openduck-installer"
+openduck_bootstrap_helper_sha256: ""

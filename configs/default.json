@@ -1,0 +1,34 @@
+{
+  "mode": "local-only",
+  "manual_copy": true,
+  "egress": "deny",
+  "accounts": false,
+  "mutations": false,
+  "local_model": "disabled",
+  "local_model_endpoint": "http://127.0.0.1:11434",
+  "local_model_name": "qwen3:8b",
+  "local_model_cloud": "disabled",
+  "listen": "127.0.0.1:8787",
+  "controller": {
+    "listen": "127.0.0.1:8788",
+    "state_path": ".openduck/controller.enc",
+    "key_ref": "macos-keychain://openduck/controller-state",
+    "callback": {
+      "enabled": false,
+      "origin": "",
+      "host": "127.0.0.1:8788",
+      "origin_probe_enabled": false
+    }
+  },
+  "queue_path": ".openduck/queue.enc",
+  "pseudonym_store_path": ".openduck/pseudonyms.enc",
+  "queue_key_ref": "macos-keychain://openduck/queue",
+  "pseudonym_key_derivation": "hmac-sha256:openduck/pseudonym-store/v1",
+  "backups": {
+    "enabled": false,
+    "scope": "local-encrypted-only",
+    "implementation": "reserved-not-implemented",
+    "cloud": false,
+    "restore_outbound": false
+  }
+}

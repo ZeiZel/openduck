@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src http://127.0.0.1:8788; style-src 'unsafe-inline';">
+    <title>OpenDuck synthetic delivery probe</title>
+    <style>
+      :root { color: #15202b; font-family: ui-sans-serif, system-ui, sans-serif; }
+      body { margin: 0; padding: 16px; background: #f7f9fc; }
+      main { max-width: 620px; margin: auto; padding: 18px; border: 1px solid #d8e0ea; border-radius: 12px; background: #fff; }
+      h1 { margin: 0 0 8px; font-size: 1.25rem; }
+      .warning { padding: 12px; border-left: 4px solid #b45309; background: #fff7ed; color: #7c2d12; font-weight: 650; }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; margin: 18px 0; }
+      dt { font-weight: 650; } dd { margin: 0; font-family: ui-monospace, SFMono-Regular, monospace; }
+      .probe { margin-top: 16px; padding: 12px; border: 1px solid #d8e0ea; border-radius: 8px; background: #f8fafc; }
+      .tasks { margin: 16px 0 0; padding: 0; list-style: none; }
+      .tasks li { margin: 8px 0; padding: 10px; border: 1px solid #d8e0ea; border-radius: 8px; background: #f8fafc; }
+      .tasks code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: .84rem; overflow-wrap: anywhere; }
+      .probe button { padding: 8px 12px; border: 0; border-radius: 7px; background: #2563eb; color: #fff; cursor: pointer; }
+      .probe button:disabled { background: #cbd5e1; color: #475569; cursor: not-allowed; }
+      .probe-status { margin: 8px 0 0; color: #526273; font-size: .9rem; }
+      footer { margin-top: 16px; color: #526273; font-size: .9rem; }
+    </style>
+  </head>
+  <body>
+    <main aria-labelledby="title">
+      <h1 id="title">OpenDuck Controller — synthetic dashboard</h1>
+      <p class="warning" role="alert">DEMO ONLY: this dashboard displays read-only synthetic lifecycle metadata. It is not an approval UI and cannot create an OwnerDecisionEvent, task, or external effect.</p>
+      <dl>
+        <dt>Delivery state</dt><dd>UI_DELIVERY_BLOCKED</dd>
+        <dt>Probe scope</dt><dd>bounded-loopback-read-only</dd>
+        <dt>Callback</dt><dd>absent</dd>
+        <dt>Action proposal</dt><dd>none</dd>
+        <dt>Data class</dt><dd>synthetic</dd>
+      </dl>
+      <section aria-labelledby="tasks-title">
+        <strong id="tasks-title">Task lifecycle</strong>
+        <p class="probe-status" id="tasks-status">Reading bounded loopback task metadata…</p>
+        <ul class="tasks" id="tasks" aria-live="polite"></ul>
+      </section>
+      <button type="button" disabled aria-disabled="true">Approval unavailable</button>
+      <section class="probe" aria-labelledby="probe-title">
+        <strong id="probe-title">Loopback origin probe</strong>
+        <p class="probe-status" id="probe-status">Waiting for private probe metadata from the host.</p>
+        <button id="origin-probe" type="button" disabled aria-disabled="true">Check local Controller</button>
+      </section>
+      <footer>Host rendering and direct authenticated callback remain unverified until the pinned live Codex desktop probe.</footer>
+    </main>
+    <script>
+      (() => {
+        "use strict";
+        const button = document.getElementById("origin-probe");
+        const status = document.getElementById("probe-status");
+        const tasks = document.getElementById("tasks");
+        const tasksStatus = document.getElementById("tasks-status");
+        let privateProbeToken = null;
+
+        // Codex exposes private tool-result metadata through the documented
+        // window.openai.toolResponseMetadata bridge. Feature-detect it and
+        // accept only the exact UI metadata shape. The token is intentionally
+        // kept only in this closure and never rendered, persisted, or echoed.
+        const receivePrivateMeta = (meta) => {
+          const token = meta && meta.ui && typeof meta.ui.probeToken === "string"
+            ? meta.ui.probeToken : "";
+          if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return;
+          privateProbeToken = token;
+          button.disabled = false;
+          button.removeAttribute("aria-disabled");
+          status.textContent = "Private probe metadata received; no authority granted.";
+        };
+
+        const readToolResponseMetadata = () => {
+          const host = window.openai;
+          if (!host || typeof host !== "object") return;
+          const metadata = host.toolResponseMetadata;
+          if (!metadata || typeof metadata !== "object") return;
+          receivePrivateMeta(metadata);
+        };
+        readToolResponseMetadata();
+        // Host hydration can happen after iframe load. Poll briefly and then
+        // stop; there is no unbounded cross-window message listener.
+        let metadataPolls = 0;
+        const metadataTimer = window.setInterval(() => {
+          readToolResponseMetadata();
+          metadataPolls += 1;
+          if (privateProbeToken || metadataPolls >= 20) window.clearInterval(metadataTimer);
+        }, 250);
+
+        button.addEventListener("click", async () => {
+          const token = privateProbeToken;
+          if (!token) return;
+          button.disabled = true;
+          status.textContent = "Checking fixed loopback origin…";
+          try {
+            const result = await fetch("http://127.0.0.1:8788/v1/controller/origin-probe", {
+              method: "GET",
+              headers: { "X-OpenDuck-UI-Probe": token },
+              credentials: "omit",
+              cache: "no-store",
+              redirect: "error",
+              referrerPolicy: "no-referrer",
+            });
+            status.textContent = result.ok
+              ? "Loopback origin reachable; probe is non-authoritative."
+              : "Loopback origin rejected the probe; no authority granted.";
+          } catch (_) {
+            status.textContent = "Loopback origin unavailable; no authority granted.";
+          } finally {
+            privateProbeToken = null;
+            button.disabled = true;
+            button.setAttribute("aria-disabled", "true");
+          }
+        });
+
+        // This direct request is deliberately a read-only, fixed loopback
+        // projection. No identifier, argument or authority comes from the
+        // page; task payloads, previews and decision proofs are never exposed.
+        const loadTasks = async () => {
+          try {
+            const response = await fetch("http://127.0.0.1:8788/v1/controller/tasks", {
+              method: "GET", credentials: "omit", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer",
+            });
+            const value = await response.json();
+            if (!response.ok || !value || value.schema_version !== "controller-task-list.v1" || value.mode !== "synthetic" || !Array.isArray(value.tasks)) throw new Error("invalid task projection");
+            tasks.replaceChildren();
+            for (const task of value.tasks.slice(0, 32)) {
+              if (!task || typeof task.id !== "string" || typeof task.state !== "string" || !Number.isInteger(task.version)) continue;
+              const item = document.createElement("li");
+              const id = document.createElement("code"); id.textContent = task.id;
+              const label = document.createTextNode(" — " + task.state + " · v" + task.version + " · evidence: " + (task.has_evidence ? "present" : "absent") + " · decisions: " + (Number.isInteger(task.decision_count) ? task.decision_count : 0));
+              item.append(id, label); tasks.append(item);
+            }
+            tasksStatus.textContent = value.tasks.length ? "Read-only synthetic task projection." : "No synthetic tasks have been dispatched yet.";
+          } catch (_) {
+            tasksStatus.textContent = "Controller task projection unavailable; no authority granted.";
+          }
+        };
+        loadTasks();
+      })();
+    </script>
+  </body>
+</html>

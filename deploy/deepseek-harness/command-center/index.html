@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none';">
+    <title>Command Center</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">К содержимому</a>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">OpenDuck / DeepSeek Harness</p>
+        <h1>Command Center</h1>
+      </div>
+      <div class="runtime" aria-live="polite">
+        <span id="health-dot" class="dot dot-warn" aria-hidden="true"></span>
+        <span id="health-label">Проверка Controller…</span>
+      </div>
+    </header>
+    <div class="layout">
+      <nav class="sidebar" aria-label="Разделы Command Center" id="route-nav"></nav>
+      <main id="main" class="content" tabindex="-1">
+        <section id="degraded-banner" class="banner banner-warn" hidden aria-live="assertive"></section>
+        <section id="view" aria-live="polite"></section>
+        <section class="composer-card" aria-labelledby="composer-title">
+          <div class="section-heading">
+            <div><p class="eyebrow">Controller admission</p><h2 id="composer-title">Быстрый запрос</h2></div>
+            <span class="badge badge-neutral">сырой ввод → только Controller</span>
+          </div>
+          <form id="composer-form">
+            <label for="composer">Текст передаётся без записи в Harness</label>
+            <textarea id="composer" name="composer" rows="3" maxlength="8000" autocomplete="off" spellcheck="false" placeholder="Например: подготовь сводку по сегодняшним задачам"></textarea>
+            <div class="composer-actions">
+              <span id="composer-note" class="muted">При недоступном Controller отправка заблокирована.</span>
+              <button id="composer-submit" type="submit" disabled>Спросить ChatGPT</button>
+              <button id="owner-approval-retry" type="button" disabled hidden>Повторить после sudo-подтверждения</button>
+              <button id="chat-cancel" type="button" disabled hidden>Отменить</button>
+            </div>
+          </form>
+          <p id="admission-result" class="result" aria-live="polite" hidden></p>
+          <p id="chat-result" class="result" aria-live="polite" hidden></p>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

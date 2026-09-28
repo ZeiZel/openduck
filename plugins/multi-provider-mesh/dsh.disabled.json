@@ -1,0 +1,11 @@
+{
+  "schema_version": "openduck-dsh-static-package.v1",
+  "package": "@openduck/multi-provider-mesh",
+  "enabled": false,
+  "reason_code": "UI_PROJECTION_FEASIBILITY_UNRESOLVED",
+  "required_before_enable": [
+    "authenticated Controller UI channel",
+    "proof of no model, AgentLoop, or session-log delivery",
+    "reviewed package digest and Controller lifecycle approval"
+  ]
+}

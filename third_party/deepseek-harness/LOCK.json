@@ -1,0 +1,73 @@
+{
+  "schema": "openduck.dsh.source-lock.v1",
+  "project": "deepseek-harness",
+  "tag": "dsh-v0.1.0-rc.7",
+  "commit": "99f6f02fecdb7dff40c3fbc9470f5907c29f74ca",
+  "archive": {
+    "url": "https://github.com/deepseek-ai/deepseek-harness/archive/99f6f02fecdb7dff40c3fbc9470f5907c29f74ca.tar.gz",
+    "sha256": "e906ea17f4d39f610e9434194c9605276d8de07789419f138e9bb5a3a2b7d8b8"
+  },
+  "source": {
+    "manifest": "SOURCE-MANIFEST.sha256",
+    "manifestSha256": "3a5895683e5f2bf3bb9e19cfa9fdc7f939e786fd927aeca7abad95f71337b2c6",
+    "manifestMode": "tree-v1",
+    "workspaceSha256": "39d569ce64de5fcfff5db3467304d143bbc6816c03442357af854827f3718f5f",
+    "packageJsonSha256": "d1c81c2fa4a68c5aa4092122bed6160b2e245451260d630a70dba4f282c65f34",
+    "pnpmLockSha256": "f517dc3978d57531cda747df62a2abdde1df5b9f25415fcf1fc5d51f8b7547ea"
+  },
+  "runtime": {
+    "packageManager": "pnpm@11.7.0",
+    "node": ">=22.19.0",
+    "buildNetwork": "disabled",
+    "providers": "disabled",
+    "effects": "disabled",
+    "telemetry": "disabled"
+  },
+  "scripts": {
+    "allowedBuildScripts": [],
+    "reviewedBuildPermissions": {
+      "esbuild": "review-required; allow only in isolated build",
+      "lefthook": "review-required; hooks disabled in P0",
+      "node-pty": "review-required; native build disabled in P0",
+      "koffi": "review-required; native build disabled in P0",
+      "@deepseek-ai/dsh-subprocess-local": "review-required; helper install disabled in P0"
+    },
+    "reviewedLifecycleScripts": [
+      {
+        "package": "root",
+        "name": "postinstall",
+        "command": "node scripts/install-lefthook.mjs",
+        "decision": "blocked-in-materialization"
+      },
+      {
+        "package": "packages/subprocess/subprocess-local",
+        "name": "postinstall",
+        "command": "node scripts/ensure-spawn-helper.mjs",
+        "decision": "blocked-in-materialization"
+      },
+      {
+        "package": "native/landlock-run/packages/linux-arm64",
+        "name": "prepack",
+        "command": "node ../../scripts/verify-launcher-binary.mjs",
+        "decision": "blocked-in-materialization"
+      },
+      {
+        "package": "native/landlock-run/packages/linux-x64",
+        "name": "prepack",
+        "command": "node ../../scripts/verify-launcher-binary.mjs",
+        "decision": "blocked-in-materialization"
+      },
+      {
+        "package": "native/landlock-run/packages/entry",
+        "name": "prepack",
+        "command": "node ../../scripts/verify-entry-lib.mjs",
+        "decision": "blocked-in-materialization"
+      }
+    ]
+  },
+  "license": {
+    "source": "LICENSE",
+    "thirdPartyNotices": "THIRD_PARTY_NOTICES.md",
+    "policy": "No dependency install or promotion without generated SBOM/license review."
+  }
+}

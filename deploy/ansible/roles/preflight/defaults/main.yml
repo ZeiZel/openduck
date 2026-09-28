@@ -1,0 +1,6 @@
+---
+preflight_platform: Darwin
+preflight_required_python: "3.9"
+# Unprivileged, operator-local, and deliberately outside the fixed install root
+# and the privileged PlanV2 projection. Kept beside ansible.cfg's local_tmp.
+preflight_log_dir: "{{ playbook_dir }}/.openduck/logs"

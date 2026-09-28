@@ -1,0 +1,7 @@
+---
+# A standalone stop would consume a release nonce before deploy. The trusted
+# installer therefore owns stop ordering inside its single sealed transaction.
+- name: Record that standalone stop is disabled
+  ansible.builtin.set_fact:
+    lifecycle_stop_delegated_to_deploy: true
+  become: false

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openduck.local/schemas/codex-runtime/general-chat.v1.json",
+  "title": "Owner-only read-only General Chat",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "chat_id", "prompt", "workspace_roots", "classification", "max_output_bytes", "approval_policy", "read_only", "tools_disabled", "network_mode"],
+  "properties": {
+    "schema_version": {"const": "general-chat-order.v1"},
+    "chat_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "thread_id": {"type": "string", "maxLength": 256},
+    "prompt": {"type": "string", "minLength": 1, "maxLength": 65536},
+    "workspace_roots": {"type": "array", "minItems": 0, "maxItems": 0},
+    "classification": {"enum": ["L0", "L1"]},
+    "model": {"type": "string", "maxLength": 256},
+    "max_output_bytes": {"type": "integer", "minimum": 1, "maximum": 262144},
+    "approval_policy": {"const": "never"},
+    "read_only": {"const": true},
+    "tools_disabled": {"const": true},
+    "network_mode": {"const": "model_only"}
+  }
+}

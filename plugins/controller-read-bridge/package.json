@@ -1,0 +1,13 @@
+{
+  "name": "@openduck/controller-read-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "In-memory same-origin Controller read client for the three OpenDuck DSH plugin projections.",
+  "main": "./src/index.js",
+  "exports": { ".": "./src/index.js", "./client": "./src/dsh-client.js", "./browser-client": "./src/browser-client.js" },
+  "files": ["src", "test", "dsh.disabled.json", "README.md"],
+  "scripts": { "test": "node --test test/*.test.mjs", "typecheck": "node --check src/index.js && node --check src/dsh-client.js && node --check test/*.mjs" },
+  "openduck": { "dsh": { "status": "disabled", "reason": "Pinned DSH profile remains disabled until the native host bridge is independently enabled." } },
+  "dsh": { "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-client-ui-conversation"] } }
+}

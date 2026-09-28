@@ -1,0 +1,22 @@
+---
+# This is intentionally a separate owner action. It never includes deployment
+# and cannot turn a normal deploy into an implicit repair operation.
+- name: Quarantine one exact interrupted OpenDuck bootstrap
+  hosts: localhost
+  gather_facts: false
+  vars:
+    openduck_root: "/Library/Application Support/OpenDuck"
+    openduck_recovery_intent: "quarantine-partial-install-v1"
+    openduck_recovery_apply: false
+  tasks:
+    - name: Require fixed partial-install recovery contract
+      ansible.builtin.assert:
+        that:
+          - openduck_root == '/Library/Application Support/OpenDuck'
+          - openduck_recovery_intent == 'quarantine-partial-install-v1'
+      become: false
+
+    - name: Run explicit partial-install recovery role
+      ansible.builtin.include_role:
+        name: partial_install_recovery
+      tags: [partial_install_recovery]

@@ -1,0 +1,54 @@
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+
+# OpenDuck runtime state, encrypted stores, generated binaries, and diagnostics.
+# Source configuration and dependency lockfiles are intentionally not ignored.
+.openduck/
+.openclaw-state/
+deploy/openclaw/config.json
+deploy/openclaw/local-overlay.json
+deploy/openclaw/cua-driver-overlay.json
+deploy/local-specs/
+deploy/openclaw/*.local.json
+*.enc
+*.enc.*
+*.log
+*.pid
+*.sock
+
+# Local credentials. Keep documented templates (for example, .env.example).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.credentials
+credentials/
+secrets/
+
+# Local tooling output and operating-system noise.
+.DS_Store
+__pycache__/
+*.py[cod]
+node_modules/
+.pnpm-store/
+dist/
+build/
+coverage/
+.cache/
+tmp/
+temp/
+*.bak
+*.bak.*
+*.orig
+*.rej
+*.stdout.txt
+*.stderr.txt
+deploy/openclaw/config.json.last-good
+deploy/deepseek-harness/probe/live-attempt-*

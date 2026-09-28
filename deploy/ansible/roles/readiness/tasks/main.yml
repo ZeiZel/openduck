@@ -1,0 +1,387 @@
+---
+- name: Initialize readiness cleanup state
+  ansible.builtin.set_fact:
+    readiness_primary_failed: false
+    readiness_cleanup_failed: false
+  no_log: true
+  become: false
+
+- name: Skip post-transaction inspection in check mode
+  ansible.builtin.debug:
+    msg: "check mode: installed readiness inspection skipped"
+  when: ansible_check_mode
+  become: false
+
+- name: Inspect installed boundary through read-only verify JSON
+  when:
+    - not ansible_check_mode
+    - openduck_activate | bool
+    - not lifecycle_converged | bool
+  block:
+    - name: Recheck random invocation handoff before readiness helper copy
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path }}"
+        follow: false
+      register: readiness_run_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require intact random invocation handoff before readiness helper copy
+      ansible.builtin.assert:
+        that:
+          - lifecycle_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+          - readiness_run_dir_stat.stat.isdir | default(false)
+          - not (readiness_run_dir_stat.stat.islnk | default(false))
+          - (readiness_run_dir_stat.stat.uid | default(-1) | int) == 0
+          - (readiness_run_dir_stat.stat.gid | default(-1) | int) == 0
+          - readiness_run_dir_stat.stat.gr_name | default('') == 'wheel'
+          - readiness_run_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+
+    - name: Inspect newly installed installer before readiness verification
+      ansible.builtin.stat:
+        path: "/Library/Application Support/OpenDuck/.openduck-installer"
+        follow: false
+        checksum_algorithm: sha256
+      register: readiness_installer_stat
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require newly installed installer metadata and admitted current digest
+      ansible.builtin.assert:
+        that:
+          - readiness_installer_stat.stat.isreg | default(false)
+          - not (readiness_installer_stat.stat.islnk | default(false))
+          - (readiness_installer_stat.stat.nlink | default(0) | int) == 1
+          - (readiness_installer_stat.stat.uid | default(-1) | int) == 0
+          - (readiness_installer_stat.stat.gid | default(-1) | int) == 0
+          - readiness_installer_stat.stat.gr_name | default('') == 'wheel'
+          - readiness_installer_stat.stat.mode | default('') == '0700'
+          - readiness_installer_stat.stat.checksum == trusted_helper_current_manifest_helper_digest
+        fail_msg: "newly installed helper is not root:wheel 0700 nlink=1 or does not match admitted current ManifestV2"
+      no_log: true
+      become: false
+
+    - name: Copy readiness helper to fixed per-run path
+      ansible.builtin.copy:
+        src: "/Library/Application Support/OpenDuck/.openduck-installer"
+        dest: "{{ lifecycle_run_handoff.path }}/readiness-installer"
+        remote_src: true
+        owner: root
+        group: wheel
+        mode: '0700'
+      no_log: true
+      become: true
+
+    - name: Hash-check readiness helper copy
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path }}/readiness-installer"
+        follow: false
+        checksum_algorithm: sha256
+      register: readiness_helper_stat
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Assert readiness helper hash parity
+      ansible.builtin.assert:
+        that:
+          - readiness_helper_stat.stat.isreg | default(false)
+          - not (readiness_helper_stat.stat.islnk | default(false))
+          - (readiness_helper_stat.stat.nlink | default(0) | int) == 1
+          - readiness_helper_stat.stat.mode | default('') == '0700'
+          - readiness_helper_stat.stat.checksum == trusted_helper_current_manifest_helper_digest
+        fail_msg: "readiness helper hash changed during copy"
+      no_log: true
+      become: false
+
+    - name: Recheck random invocation handoff before scoped verification execution
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path }}"
+        follow: false
+      register: readiness_verify_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require intact random invocation handoff before scoped verification execution
+      ansible.builtin.assert:
+        that:
+          - readiness_verify_dir_stat.stat.isdir | default(false)
+          - not (readiness_verify_dir_stat.stat.islnk | default(false))
+          - (readiness_verify_dir_stat.stat.uid | default(-1) | int) == 0
+          - (readiness_verify_dir_stat.stat.gid | default(-1) | int) == 0
+          - readiness_verify_dir_stat.stat.gr_name | default('') == 'wheel'
+          - readiness_verify_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+
+    - name: Run read-only scoped verification JSON
+      ansible.builtin.command:
+        argv:
+          - "{{ lifecycle_run_handoff.path }}/readiness-installer"
+          - --verify-json=full
+          - --error-json-file
+          - "{{ lifecycle_run_handoff.path }}/helper-error.json"
+          - --release-id
+          - "{{ release_id }}"
+          - --release-version
+          - "{{ release_version }}"
+          - --release-digest
+          - "{{ release_digest }}"
+          - --run-id
+          - "{{ lifecycle_effective_run_id }}"
+      register: readiness_verify_result
+      changed_when: false
+      no_log: true
+      become: true
+
+    - name: Project verification report without exposing payload
+      ansible.builtin.set_fact:
+        readiness_verify_report: "{{ readiness_verify_result.stdout | openduck_provisioning_verify_v1 }}"
+      no_log: true
+      become: false
+
+    - name: Validate verification report schema and drift
+      ansible.builtin.assert:
+        that:
+          - readiness_verify_report.available | default(false) | bool
+          - readiness_verify_report.clean | default(false) | bool
+        fail_msg: "installed boundary verification reports drift"
+      no_log: true
+      become: false
+
+    - name: Inspect installed readiness metadata before executing it
+      ansible.builtin.stat:
+        path: "/Library/Application Support/OpenDuck/.openduck-readiness"
+        follow: false
+        checksum_algorithm: sha256
+      register: readiness_installed_helper_stat
+      check_mode: false
+      become: true
+
+    - name: Require exact installed readiness metadata
+      ansible.builtin.assert:
+        that:
+          - readiness_installed_helper_stat.stat.isreg | default(false)
+          - not readiness_installed_helper_stat.stat.islnk | default(false)
+          - (readiness_installed_helper_stat.stat.nlink | default(0) | int) == 1
+          - (readiness_installed_helper_stat.stat.uid | default(-1) | int) == 0
+          - (readiness_installed_helper_stat.stat.gid | default(-1) | int) == 0
+          - readiness_installed_helper_stat.stat.gr_name | default('') == 'wheel'
+          - readiness_installed_helper_stat.stat.mode | default('') == '0700'
+          - >-
+            readiness_installed_helper_stat.stat.checksum ==
+            (openduck_release_artifacts |
+             selectattr('type', 'equalto', 'helper') |
+             selectattr('path', 'equalto', 'bin/openduck-readiness') |
+             map(attribute='digest') | first)
+        fail_msg: "installed readiness helper metadata is not root:wheel 0700 nlink=1"
+      no_log: true
+      become: false
+
+    - name: Copy verified installed readiness helper before root execution
+      ansible.builtin.copy:
+        src: "/Library/Application Support/OpenDuck/.openduck-readiness"
+        dest: "{{ lifecycle_run_handoff.path }}/installed-readiness"
+        remote_src: true
+        owner: root
+        group: wheel
+        mode: '0700'
+      no_log: true
+      become: true
+
+    - name: Rehash copied installed readiness helper
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path }}/installed-readiness"
+        follow: false
+        checksum_algorithm: sha256
+      register: readiness_copied_helper_stat
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require copied installed readiness helper hash parity
+      ansible.builtin.assert:
+        that:
+          - readiness_copied_helper_stat.stat.isreg | default(false)
+          - not (readiness_copied_helper_stat.stat.islnk | default(false))
+          - (readiness_copied_helper_stat.stat.nlink | default(0) | int) == 1
+          - readiness_copied_helper_stat.stat.mode | default('') == '0700'
+          - readiness_copied_helper_stat.stat.checksum == readiness_installed_helper_stat.stat.checksum
+        fail_msg: "installed readiness helper changed during copy"
+      no_log: true
+      become: false
+
+    - name: Recheck random invocation handoff before installed readiness execution
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path }}"
+        follow: false
+      register: readiness_exec_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require intact random invocation handoff before installed readiness execution
+      ansible.builtin.assert:
+        that:
+          - readiness_exec_dir_stat.stat.isdir | default(false)
+          - not (readiness_exec_dir_stat.stat.islnk | default(false))
+          - (readiness_exec_dir_stat.stat.uid | default(-1) | int) == 0
+          - (readiness_exec_dir_stat.stat.gid | default(-1) | int) == 0
+          - readiness_exec_dir_stat.stat.gr_name | default('') == 'wheel'
+          - readiness_exec_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+
+    - name: Inspect installed live readiness state after activation
+      ansible.builtin.command:
+        argv:
+          - "{{ lifecycle_run_handoff.path }}/installed-readiness"
+      register: readiness_installed_result
+      changed_when: false
+      no_log: true
+      become: true
+
+    - name: Project exactly state reason and next readiness fields
+      ansible.builtin.set_fact:
+        readiness_installed_projection: "{{ readiness_installed_result.stdout | openduck_readiness_v1 }}"
+      no_log: true
+      become: false
+
+    - name: Validate installed readiness projection
+      ansible.builtin.assert:
+        that:
+          - readiness_installed_projection.available | default(false) | bool
+        fail_msg: "installed readiness output must contain exactly state, reason, and next"
+      no_log: true
+      become: false
+
+    - name: Record actual readiness state and next gate
+      ansible.builtin.set_fact:
+        readiness_installed_state: "{{ readiness_installed_projection.state }}"
+        readiness_installed_reason: "{{ readiness_installed_projection.reason }}"
+        readiness_installed_next: "{{ readiness_installed_projection.next }}"
+      no_log: true
+      become: false
+
+    - name: Reject provisioning or approval gates after requested activation
+      ansible.builtin.assert:
+        that:
+          - readiness_installed_state in ['READY', 'SERVICE_LOGIN_REQUIRED', 'LIVE_EGRESS_CANARY_REQUIRED']
+        fail_msg: "installed readiness requires {{ readiness_installed_state }}: {{ readiness_installed_reason }}"
+      no_log: true
+      become: false
+
+    - name: Report actual readiness gate without automating login or canary
+      ansible.builtin.debug:
+        msg:
+          readiness: "{{ readiness_installed_state }}"
+          reason: "{{ readiness_installed_reason }}"
+          next: "{{ readiness_installed_next }}"
+          action: "operator must complete login/canary gates separately; Ansible never automates them"
+      become: false
+  rescue:
+    - name: Sanitize verification helper failure
+      ansible.builtin.include_tasks: ../../diagnostics/tasks/sanitize_helper_error.yml
+      vars:
+        diagnostics_effective_run_id: "{{ lifecycle_effective_run_id }}"
+        diagnostics_helper_phase: verify
+        diagnostics_run_dir: "{{ lifecycle_run_handoff.path }}"
+        diagnostics_helper_error_path: "{{ lifecycle_run_handoff.path }}/helper-error.json"
+    - name: Preserve readiness failure for diagnostics
+      ansible.builtin.set_fact:
+        readiness_failed: true
+      become: false
+    - name: Preserve bounded readiness primary failure
+      ansible.builtin.set_fact:
+        readiness_primary_failed: true
+      no_log: true
+      become: false
+  always:
+    - name: Recheck random invocation handoff before readiness helper cleanup
+      ansible.builtin.stat:
+        path: "{{ lifecycle_run_handoff.path | default('') }}"
+        follow: false
+      register: readiness_cleanup_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+      when:
+        - lifecycle_run_handoff.path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+        - "'..' not in (lifecycle_run_handoff.path | default(''))"
+    - name: Require intact random invocation handoff before readiness helper cleanup
+      ansible.builtin.assert:
+        that:
+          - lifecycle_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+          - "'..' not in lifecycle_run_handoff.path"
+          - readiness_cleanup_dir_stat.stat.isdir | default(false)
+          - not (readiness_cleanup_dir_stat.stat.islnk | default(false))
+          - (readiness_cleanup_dir_stat.stat.uid | default(-1) | int) == 0
+          - (readiness_cleanup_dir_stat.stat.gid | default(-1) | int) == 0
+          - readiness_cleanup_dir_stat.stat.gr_name | default('') == 'wheel'
+          - readiness_cleanup_dir_stat.stat.mode | default('') == '0700'
+      failed_when: false
+      no_log: true
+      become: false
+      when:
+        - lifecycle_run_handoff.path | default('') is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+        - "'..' not in (lifecycle_run_handoff.path | default(''))"
+    - name: Remove only guarded readiness helper copies
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      register: readiness_cleanup_result
+      failed_when: false
+      no_log: true
+      become: true
+      loop:
+        - "{{ lifecycle_run_handoff.path }}/readiness-installer"
+        - "{{ lifecycle_run_handoff.path }}/installed-readiness"
+      when:
+        - lifecycle_run_handoff.path is match('^/private/var/run/openduck-ansible-[a-z0-9_]{6,128}$')
+        - "'..' not in lifecycle_run_handoff.path"
+        - readiness_cleanup_dir_stat.stat.isdir | default(false)
+        - not (readiness_cleanup_dir_stat.stat.islnk | default(false))
+        - (readiness_cleanup_dir_stat.stat.uid | default(-1) | int) == 0
+        - (readiness_cleanup_dir_stat.stat.gid | default(-1) | int) == 0
+        - readiness_cleanup_dir_stat.stat.gr_name | default('') == 'wheel'
+        - readiness_cleanup_dir_stat.stat.mode | default('') == '0700'
+    - name: Preserve readiness cleanup result
+      ansible.builtin.set_fact:
+        readiness_cleanup_failed: >-
+          {{ (readiness_cleanup_result.failed | default(false) | bool) or
+             (readiness_cleanup_result is skipped) }}
+      no_log: true
+      become: false
+- name: Fail closed while preserving readiness primary failure
+  ansible.builtin.fail:
+    msg: "OpenDuck readiness verification failed"
+  when: readiness_primary_failed | bool
+  no_log: true
+  become: false
+
+- name: Fail closed on readiness cleanup failure
+  ansible.builtin.fail:
+    msg: "OpenDuck readiness cleanup failed"
+  when: readiness_cleanup_failed | bool
+  no_log: true
+  become: false
+
+- name: Report activation skipped without requiring live active state
+  ansible.builtin.debug:
+    msg:
+      readiness: scoped_verify_only
+      action: activation skipped; live readiness is intentionally not required
+  become: false
+  when:
+    - not ansible_check_mode
+    - not openduck_activate | bool
+    - not lifecycle_converged | bool

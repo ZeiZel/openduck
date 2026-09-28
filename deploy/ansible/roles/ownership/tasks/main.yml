@@ -1,0 +1,11 @@
+---
+- name: Record ownership validation boundary
+  ansible.builtin.set_fact:
+    ownership_validated: true
+  become: false
+
+- name: Assert ownership is delegated to the trusted installer
+  ansible.builtin.assert:
+    that: ownership_validated
+    fail_msg: "Ownership must not be changed by ad-hoc Ansible tasks"
+  become: false

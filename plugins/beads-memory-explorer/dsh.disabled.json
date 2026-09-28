@@ -1,0 +1,11 @@
+{
+  "schema_version": "openduck-dsh-static-package.v1",
+  "package": "@openduck/beads-memory-explorer",
+  "enabled": false,
+  "reason_code": "UPSTREAM_UI_BRIDGE_UNAVAILABLE",
+  "required_before_enable": [
+    "composed Controller typed routes",
+    "injected same-origin Controller read client",
+    "reviewed package registration and delivery evidence"
+  ]
+}

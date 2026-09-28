@@ -1,0 +1,19 @@
+---
+# Explicit owner ceremony. It cannot deploy a release and site.yml never
+# includes it, preventing an apply from self-authorizing its verification key.
+- name: Bootstrap the fixed OpenDuck release trust anchor
+  hosts: localhost
+  gather_facts: false
+  vars:
+    openduck_root: "/Library/Application Support/OpenDuck"
+  tasks:
+    - name: Require fixed OpenDuck root for release trust ceremony
+      ansible.builtin.assert:
+        that:
+          - openduck_root == '/Library/Application Support/OpenDuck'
+      become: false
+
+    - name: Run explicit release trust anchor role
+      ansible.builtin.include_role:
+        name: release_trust_anchor
+      tags: [release_trust_anchor]

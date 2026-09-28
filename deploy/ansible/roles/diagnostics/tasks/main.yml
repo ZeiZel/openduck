@@ -1,0 +1,36 @@
+---
+- name: Select the bounded helper error projection for diagnostics
+  ansible.builtin.set_fact:
+    diagnostics_effective_error: >-
+      {{ rollback_diagnostics_helper_error |
+         default(diagnostics_helper_error | default({}), true) }}
+  no_log: true
+  become: false
+
+- name: Build allowlisted deployment diagnostic projection
+  ansible.builtin.set_fact:
+    diagnostics_projection:
+      run_id: "{{ lifecycle_effective_run_id | default('unavailable') }}"
+      release_digest: "{{ release_digest | default('') }}"
+      phase: "{{ diagnostics_effective_error.phase | default('diagnostics') }}"
+      reason_code: "{{ diagnostics_effective_error.reason_code | default('none') }}"
+      primary_reason_code: "{{ diagnostics_effective_error.primary_reason_code | default(diagnostics_effective_error.reason_code | default('none')) }}"
+      compensation_reason_code: "{{ diagnostics_effective_error.compensation_reason_code | default('') }}"
+      scope: "{{ diagnostics_effective_error.scope | default('boundary') }}"
+      recovery_state: "{{ diagnostics_effective_error.recovery_state | default('none') }}"
+      rollback_state: >-
+        {{ 'unavailable' if rollback_unavailable | default(false) | bool else
+           ('failed' if rollback_failed | default(false) | bool else
+            ('rolled_back' if rollback_performed | default(false) | bool else 'not_requested')) }}
+      rollback_reason_code: "{{ rollback_error.reason_code | default('') }}"
+      mode: "{{ lifecycle_mode | default('unknown') }}"
+      check_mode: "{{ ansible_check_mode | bool }}"
+      changed: "{{ atomic_commit_changed | default(false) | bool }}"
+      converged: "{{ lifecycle_converged | default(false) | bool }}"
+  no_log: true
+  become: false
+
+- name: Emit bounded non-secret deployment summary
+  ansible.builtin.debug:
+    msg: "{{ diagnostics_projection }}"
+  become: false

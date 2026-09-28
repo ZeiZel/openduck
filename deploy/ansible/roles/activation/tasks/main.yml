@@ -1,0 +1,16 @@
+---
+# Activation is a bounded boolean inside --deploy. Keeping this role makes the
+# requested state visible without introducing a second nonce-consuming action.
+- name: Record activation intent delegated to sealed deploy
+  ansible.builtin.set_fact:
+    activation_requested: "{{ openduck_activate | bool }}"
+  become: false
+  when:
+    - not ansible_check_mode
+    - not lifecycle_converged | bool
+
+- name: Report activation skipped in check mode
+  ansible.builtin.debug:
+    msg: "check mode: activation would be bound to sealed deploy"
+  when: ansible_check_mode
+  become: false

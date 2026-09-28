@@ -1,0 +1,11 @@
+{
+  "codex_version": "0.142.3",
+  "binary_sha256": "d3be844c45c4fd89392536e56e1010963f94785592596b50cd0c45bb8a341406",
+  "schema_sha256": "62e7400ffe4acfb9026e6286ec2eb593a44c8b49df062a7ba6652e195be429a6",
+  "source_command": "node <codex-cli>/bin/codex.js app-server generate-json-schema --out <temporary-schema-dir>",
+  "protocol": "v2",
+  "account_method": "account/get",
+  "config_method": "config/read",
+  "thread_sandbox": "read-only",
+  "login_types": ["chatgpt", "chatgptDeviceCode"]
+}

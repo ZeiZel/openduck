@@ -1,0 +1,21 @@
+{
+  "name": "@openduck/multi-provider-mesh",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Disabled-by-default static Controller UI state for OpenDuck's multi-provider mesh.",
+  "main": "./src/index.js",
+  "exports": { ".": "./src/index.js" },
+  "files": ["src", "test", "native", "dsh.disabled.json", "README.md"],
+  "scripts": {
+    "test": "bun test test/*.test.mjs",
+    "typecheck": "bun --check src/index.js && bun --check src/native-packages.js && node --check test/*.mjs",
+    "test:native-fixtures": "bun test test/native-fixtures.test.mjs"
+  },
+  "openduck": {
+    "dsh": {
+      "status": "disabled",
+      "reason": "DSH UI projection feasibility is unresolved; this package has no DSH registration."
+    }
+  }
+}

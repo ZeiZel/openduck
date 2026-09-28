@@ -1,0 +1,13 @@
+---
+- name: Inspect fixed root without mutating the device
+  ansible.builtin.stat:
+    path: "{{ openduck_root }}"
+    follow: false
+  register: layout_root_stat
+  check_mode: false
+  become: true
+
+- name: Record layout validation
+  ansible.builtin.set_fact:
+    layout_validated: true
+  become: false

@@ -1,0 +1,185 @@
+---
+# A recovery is never a fallback inside deployment. It admits only an exact
+# installer/readiness root plus empty controller-release ancestry and lets the
+# independently authenticated helper perform one
+# same-parent atomic quarantine rename. No recursive deletion is used.
+- name: Require explicit owner recovery inputs
+  ansible.builtin.assert:
+    that:
+      - openduck_recovery_confirm | default('', true) == 'quarantine-partial-install-v1'
+      - openduck_recovery_bootstrap_helper_path | default('', true) is string
+      - openduck_recovery_bootstrap_helper_path | default('', true) is match('^/')
+      - openduck_recovery_bootstrap_helper_sha256 | default('', true) is match('^[0-9a-f]{64}$')
+      - openduck_recovery_readiness_sha256 | default('', true) is match('^[0-9a-f]{64}$')
+      - openduck_recovery_bootstrap_helper_path != openduck_root
+      - not openduck_recovery_bootstrap_helper_path.startswith(openduck_root ~ '/')
+      - ansible_check_mode or (openduck_recovery_apply | default(false) | bool)
+    fail_msg: "partial-install recovery requires explicit confirmation and an independent pretrusted helper path and digest"
+  no_log: true
+  become: false
+
+- name: Inspect independent recovery helper without following links
+  ansible.builtin.stat:
+    path: "{{ openduck_recovery_bootstrap_helper_path }}"
+    follow: false
+    checksum_algorithm: sha256
+  register: partial_install_recovery_source_stat
+  check_mode: false
+  no_log: true
+  become: false
+
+- name: Require exact independent recovery helper digest and shape
+  ansible.builtin.assert:
+    that:
+      - partial_install_recovery_source_stat.stat.isreg | default(false)
+      - not (partial_install_recovery_source_stat.stat.islnk | default(false))
+      - (partial_install_recovery_source_stat.stat.nlink | default(0) | int) == 1
+      - partial_install_recovery_source_stat.stat.mode | default('') is match('^[0-7]{3,4}$')
+      - (partial_install_recovery_source_stat.stat.mode | default(''))[-2] not in ['2', '3', '6', '7']
+      - (partial_install_recovery_source_stat.stat.mode | default(''))[-1] not in ['2', '3', '6', '7']
+      - partial_install_recovery_source_stat.stat.checksum == openduck_recovery_bootstrap_helper_sha256
+    fail_msg: "partial-install recovery helper is unsafe or its independent digest does not match"
+  no_log: true
+  become: false
+
+- name: Report that check mode never invokes or copies a recovery helper
+  ansible.builtin.debug:
+    msg:
+      schema: openduck.partial-install-recovery.v1
+      state: check_only
+      reason: explicit_recovery_helper_not_executed_in_check_mode
+  changed_when: false
+  become: false
+  when: ansible_check_mode
+
+- name: Quarantine exact partial root through a copied verified helper
+  when:
+    - not ansible_check_mode
+    - openduck_recovery_apply | bool
+  block:
+    - name: Allocate random root-owned partial recovery handoff directory
+      ansible.builtin.tempfile:
+        state: directory
+        path: /private/var/run
+        prefix: openduck-recovery-
+      register: partial_install_recovery_tempdir
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Normalize partial recovery handoff to root:wheel before verification
+      ansible.builtin.file:
+        path: "{{ partial_install_recovery_tempdir.path }}"
+        state: directory
+        owner: root
+        group: wheel
+        mode: '0700'
+        follow: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Inspect random root-owned partial recovery handoff directory
+      ansible.builtin.stat:
+        path: "{{ partial_install_recovery_tempdir.path }}"
+        follow: false
+      register: partial_install_recovery_dir_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require random root-owned partial recovery handoff metadata
+      ansible.builtin.assert:
+        that:
+          - partial_install_recovery_tempdir.path is match('^/private/var/run/openduck-recovery-[a-z0-9_]{6,128}$')
+          - "'..' not in partial_install_recovery_tempdir.path"
+          - partial_install_recovery_dir_stat.stat.isdir | default(false)
+          - not (partial_install_recovery_dir_stat.stat.islnk | default(false))
+          - (partial_install_recovery_dir_stat.stat.uid | default(-1) | int) == 0
+          - (partial_install_recovery_dir_stat.stat.gid | default(-1) | int) == 0
+          - partial_install_recovery_dir_stat.stat.gr_name | default('') == 'wheel'
+          - partial_install_recovery_dir_stat.stat.mode | default('') == '0700'
+      no_log: true
+      become: false
+
+    - name: Copy independent recovery helper to root-owned handoff
+      ansible.builtin.copy:
+        src: "{{ openduck_recovery_bootstrap_helper_path }}"
+        dest: "{{ partial_install_recovery_tempdir.path }}/recovery-installer"
+        remote_src: true
+        owner: root
+        group: wheel
+        mode: '0700'
+      no_log: true
+      become: true
+
+    - name: Rehash copied partial recovery helper
+      ansible.builtin.stat:
+        path: "{{ partial_install_recovery_tempdir.path }}/recovery-installer"
+        follow: false
+        checksum_algorithm: sha256
+      register: partial_install_recovery_helper_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+
+    - name: Require copied partial recovery helper identity
+      ansible.builtin.assert:
+        that:
+          - partial_install_recovery_helper_stat.stat.isreg | default(false)
+          - not (partial_install_recovery_helper_stat.stat.islnk | default(false))
+          - (partial_install_recovery_helper_stat.stat.nlink | default(0) | int) == 1
+          - (partial_install_recovery_helper_stat.stat.uid | default(-1) | int) == 0
+          - (partial_install_recovery_helper_stat.stat.gid | default(-1) | int) == 0
+          - partial_install_recovery_helper_stat.stat.gr_name | default('') == 'wheel'
+          - partial_install_recovery_helper_stat.stat.mode | default('') == '0700'
+          - partial_install_recovery_helper_stat.stat.checksum == openduck_recovery_bootstrap_helper_sha256
+      no_log: true
+      become: false
+
+    - name: Atomically quarantine only the exact partial root
+      ansible.builtin.command:
+        argv:
+          - "{{ partial_install_recovery_tempdir.path }}/recovery-installer"
+          - --recover-partial-install
+          - --recovery-intent
+          - "{{ openduck_recovery_intent }}"
+          - --recovery-bootstrap-helper
+          - "{{ partial_install_recovery_tempdir.path }}/recovery-installer"
+          - --recovery-bootstrap-sha256
+          - "{{ openduck_recovery_bootstrap_helper_sha256 }}"
+          - --recovery-readiness-sha256
+          - "{{ openduck_recovery_readiness_sha256 }}"
+      register: partial_install_recovery_result
+      changed_when: true
+      no_log: true
+      become: true
+  always:
+    - name: Reinspect partial recovery handoff before cleanup
+      ansible.builtin.stat:
+        path: "{{ partial_install_recovery_tempdir.path | default('') }}"
+        follow: false
+      register: partial_install_recovery_cleanup_stat
+      changed_when: false
+      check_mode: false
+      no_log: true
+      become: true
+      when: partial_install_recovery_tempdir.path | default('') is match('^/private/var/run/openduck-recovery-[a-z0-9_]{6,128}$')
+
+    - name: Remove only validated random partial recovery handoff
+      ansible.builtin.file:
+        path: "{{ partial_install_recovery_tempdir.path | default('') }}"
+        state: absent
+      failed_when: false
+      no_log: true
+      become: true
+      when:
+        - partial_install_recovery_tempdir.path | default('') is match('^/private/var/run/openduck-recovery-[a-z0-9_]{6,128}$')
+        - partial_install_recovery_cleanup_stat.stat.isdir | default(false)
+        - not (partial_install_recovery_cleanup_stat.stat.islnk | default(false))
+        - (partial_install_recovery_cleanup_stat.stat.uid | default(-1) | int) == 0
+        - (partial_install_recovery_cleanup_stat.stat.gid | default(-1) | int) == 0
+        - partial_install_recovery_cleanup_stat.stat.gr_name | default('') == 'wheel'
+        - partial_install_recovery_cleanup_stat.stat.mode | default('') == '0700'

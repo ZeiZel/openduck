@@ -1,0 +1,163 @@
+--- /dev/null	2026-08-19 20:11:08.450021000 +0300
++++ b/packages/host/apiproxy/src/openduck-ingress.ts	2026-08-19 20:11:00.169673984 +0300
+@@ -0,0 +1,160 @@
++/**
++ * OpenDuck ingress boundary for the pinned DSH distribution.
++ *
++ * This module deliberately has no network, filesystem, or signature authority.
++ * Production composition must inject a Controller verifier.  The default is a
++ * permanent deny, so an unconfigured fork cannot accidentally become a raw
++ * model-visible ingress.
++ */
++
++export interface CloudAdmissionProof {
++  admission_id: string
++  target_session_id: string
++  prompt_digest: string
++  content_digest: string
++  policy_digest: string
++  runtime_digest: string
++  nonce: string
++  issued_at: string
++  expires_at: string
++  max_uses: 1
++  controller_signature: string
++}
++
++export interface AdmissionTarget {
++  sessionId: string
++  promptDigest: string
++  contentDigest: string
++  policyDigest: string
++  runtimeDigest: string
++}
++
++export interface AdmissionReceipt {
++  admission_id: string
++  append_attempt_id: string
++  target_session_id: string
++  prompt_digest: string
++  consumed_at: string
++}
++
++export interface VerifiedAdmission {
++  readonly proof: CloudAdmissionProof
++}
++
++export interface AdmissionVerifier {
++  verify(proof: CloudAdmissionProof, target: AdmissionTarget, now: number): Promise<VerifiedAdmission | undefined> | VerifiedAdmission | undefined
++  consume(admission: VerifiedAdmission, target: AdmissionTarget, now: number): Promise<AdmissionReceipt> | AdmissionReceipt
++}
++
++export interface AdmissionRuntime {
++  target(sessionId: string, payload: unknown): AdmissionTarget
++  verifier: AdmissionVerifier
++}
++
++export async function requireRequestAdmission(
++  payload: unknown,
++  sessionId: string,
++  runtime?: AdmissionRuntime,
++): Promise<AdmissionReceipt> {
++  const target = runtime?.target(sessionId, payload) ?? {
++    sessionId,
++    promptDigest: '',
++    contentDigest: '',
++    policyDigest: '',
++    runtimeDigest: '',
++  }
++  return requireAdmission(payload, target, runtime?.verifier)
++}
++
++export class AdmissionDeniedError extends Error {
++  readonly code = 'OPENDUCK_ADMISSION_REQUIRED'
++
++  constructor() {
++    super('raw model-visible ingress is disabled; a single-use Controller admission is required')
++    this.name = 'AdmissionDeniedError'
++  }
++}
++
++/** The safe default: no Controller means no cloud/DSH append. */
++export const denyAllAdmission: AdmissionVerifier = {
++  verify: () => undefined,
++  consume: () => { throw new AdmissionDeniedError() },
++}
++
++/** In-process one-use receipt seam used by Controller composition and tests. */
++export class AdmissionLedger implements AdmissionVerifier {
++  private readonly consumed = new Set<string>()
++  private readonly trustedVerify: (proof: CloudAdmissionProof, target: AdmissionTarget) => VerifiedAdmission | undefined
++
++  constructor(trustedVerify: (proof: CloudAdmissionProof, target: AdmissionTarget) => VerifiedAdmission | undefined) {
++    this.trustedVerify = trustedVerify
++  }
++
++  verify(proof: CloudAdmissionProof, target: AdmissionTarget): VerifiedAdmission | undefined {
++    if (this.consumed.has(proof.admission_id)) return undefined
++    const admission = this.trustedVerify(proof, target)
++    return admission?.proof.admission_id === proof.admission_id ? admission : undefined
++  }
++
++  consume(admission: VerifiedAdmission, target: AdmissionTarget, now: number): AdmissionReceipt {
++    const id = admission.proof.admission_id
++    if (this.consumed.has(id)) throw new AdmissionDeniedError()
++    this.consumed.add(id)
++    return {
++      admission_id: id,
++      append_attempt_id: `${id}:append`,
++      target_session_id: target.sessionId,
++      prompt_digest: admission.proof.prompt_digest,
++      consumed_at: new Date(now).toISOString(),
++    }
++  }
++}
++
++function isProof(value: unknown): value is CloudAdmissionProof {
++  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
++  const proof = value as Record<string, unknown>
++  return typeof proof.admission_id === 'string' && proof.admission_id.length > 0
++    && typeof proof.target_session_id === 'string' && proof.target_session_id.length > 0
++    && typeof proof.prompt_digest === 'string' && proof.prompt_digest.length > 0
++    && typeof proof.content_digest === 'string' && proof.content_digest.length > 0
++    && typeof proof.policy_digest === 'string' && proof.policy_digest.length > 0
++    && typeof proof.runtime_digest === 'string' && proof.runtime_digest.length > 0
++    && typeof proof.nonce === 'string' && proof.nonce.length > 0
++    && typeof proof.issued_at === 'string' && typeof proof.expires_at === 'string'
++    && proof.max_uses === 1
++    && typeof proof.controller_signature === 'string' && proof.controller_signature.length > 0
++}
++
++/** Extract only the opaque proof; payload content is never accepted as authority. */
++export function admissionFromPayload(payload: unknown): CloudAdmissionProof | undefined {
++  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined
++  const value = (payload as Record<string, unknown>).admission
++  return isProof(value) ? value : undefined
++}
++
++/**
++ * Validate the proof before any attachment save, inbox splice, session append,
++ * or model dispatch.  A successful check is only an authorization decision;
++ * the caller remains responsible for consuming it exactly once in Controller.
++ */
++export async function requireAdmission(
++  payload: unknown,
++  target: AdmissionTarget,
++  verifier: AdmissionVerifier = denyAllAdmission,
++  now = Date.now(),
++): Promise<AdmissionReceipt> {
++  const proof = admissionFromPayload(payload)
++  if (proof === undefined || proof.target_session_id !== target.sessionId
++    || proof.prompt_digest !== target.promptDigest
++    || proof.content_digest !== target.contentDigest
++    || proof.policy_digest !== target.policyDigest
++    || proof.runtime_digest !== target.runtimeDigest
++    || proof.max_uses !== 1
++    || Date.parse(proof.issued_at) > now
++    || Date.parse(proof.expires_at) <= now) {
++    throw new AdmissionDeniedError()
++  }
++  const admission = await verifier.verify(proof, target, now)
++  if (admission === undefined) throw new AdmissionDeniedError()
++  return await verifier.consume(admission, target, now)
++}

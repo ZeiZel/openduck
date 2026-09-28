@@ -1,0 +1,24 @@
+{
+  "name": "openduck-control",
+  "version": "0.1.0+codex.20260813060305",
+  "description": "Synthetic, read-only Controller status and MCP Apps render probe for Codex.",
+  "author": {
+    "name": "Local developer"
+  },
+  "interface": {
+    "displayName": "Openduck Control",
+    "shortDescription": "Read-only Controller status and UI-delivery probe.",
+    "longDescription": "A synthetic H0 probe only. It cannot approve, authorize, or mutate; its optional read-only probe is pinned to the local Controller loopback origin.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Show the synthetic OpenDuck Controller status.",
+      "Render the synthetic OpenDuck UI delivery probe."
+    ]
+  },
+  "mcpServers": "./.mcp.json",
+  "apps": "./.app.json"
+}

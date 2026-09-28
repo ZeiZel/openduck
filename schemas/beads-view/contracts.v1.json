@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openduck.local/schemas/beads-view/contracts.v1.json",
+  "title": "OpenDuck Beads view",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scope", "nodes", "edges"],
+  "properties": {
+    "schema_version": {"const": "beads-view.v1"},
+    "scope": {"$ref": "#/$defs/scope"},
+    "nodes": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/node"}},
+    "edges": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/edge"}}
+  },
+  "$defs": {
+    "scope": {"type":"object","additionalProperties":false,"required":["namespace","id","provenance","item_count"],"properties":{"namespace":{"enum":["project","global"]},"id":{"type":"string","maxLength":512},"root":{"type":"string","maxLength":512},"provenance":{"type":"string","maxLength":512},"item_count":{"type":"integer","minimum":0,"maximum":128}}},
+    "node": {"type":"object","additionalProperties":false,"required":["id","namespace","kind","title","status","sensitivity","provenance"],"properties":{"id":{"type":"string","maxLength":512},"namespace":{"enum":["project","global"]},"kind":{"type":"string","maxLength":512},"title":{"type":"string","maxLength":512},"status":{"type":"string","maxLength":512},"sensitivity":{"type":"string","maxLength":512},"provenance":{"type":"string","maxLength":512}}},
+    "edge": {"type":"object","additionalProperties":false,"required":["from","to","kind"],"properties":{"from":{"type":"string","maxLength":512},"to":{"type":"string","maxLength":512},"kind":{"type":"string","maxLength":512}}},
+    "search_result": {"type":"object","additionalProperties":false,"required":["id","namespace","kind","title","status","sensitivity","provenance"],"properties":{"id":{"type":"string","maxLength":512},"namespace":{"enum":["project","global"]},"kind":{"type":"string","maxLength":512},"title":{"type":"string","maxLength":512},"status":{"type":"string","maxLength":512},"sensitivity":{"type":"string","maxLength":512},"provenance":{"type":"string","maxLength":512}}},
+    "memory_chat": {"type":"object","additionalProperties":false,"required":["id","namespace","category","sensitivity","status","provenance","updated_at"],"properties":{"id":{"type":"string","maxLength":512},"namespace":{"enum":["project","global"]},"category":{"type":"string","maxLength":512},"sensitivity":{"type":"string","maxLength":512},"status":{"type":"string","maxLength":512},"provenance":{"type":"string","maxLength":512},"updated_at":{"type":"string","format":"date-time"}}},
+    "private_ref": {"type":"object","additionalProperties":false,"required":["opaque_id","category","sensitivity","provenance"],"properties":{"opaque_id":{"type":"string","pattern":"^private:[0-9a-f]{64}$"},"category":{"type":"string","maxLength":512},"sensitivity":{"type":"string","maxLength":512},"provenance":{"type":"string","maxLength":512}}}
+  }
+}

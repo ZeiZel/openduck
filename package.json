@@ -1,0 +1,34 @@
+{
+  "name": "openduck",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenDuck root workspace for independently versioned local plugins.",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "plugins/*"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test:go": "go test ./...",
+    "vet:go": "go vet ./...",
+    "require:node": "./scripts/require-node.sh",
+    "test:plugins": "./scripts/require-node.sh && bun run --filter @openduck/beads-memory-explorer test && bun run --filter @openduck/workspace-groups test && bun run --filter @openduck/controller-read-bridge test && bun run --filter @openduck/multi-provider-mesh test",
+    "typecheck:plugins": "./scripts/require-node.sh && bun run --filter @openduck/beads-memory-explorer typecheck && bun run --filter @openduck/workspace-groups typecheck && bun run --filter @openduck/controller-read-bridge typecheck && bun run --filter @openduck/multi-provider-mesh typecheck",
+    "check:multi-provider-spec": "node ./scripts/check-multi-provider-spec.mjs",
+    "test:multi-provider-spec": "node --test ./scripts/check-multi-provider-spec.test.mjs",
+    "verify:dsh": "./scripts/dsh-verify.sh",
+    "verify:dsh-sentinel": "node ./scripts/dsh-command-center-sentinel.mjs",
+    "verify:ansible-p5": "./scripts/verify-ansible-p5.sh",
+    "verify:ansible-p5:ci": "./scripts/verify-ansible-p5.sh --ci",
+    "verify:ansible-p5:doctor": "./scripts/verify-ansible-p5.sh --doctor",
+    "stage:release": "./scripts/stage-release.sh",
+    "deploy:macos": "./scripts/deploy-macos.sh",
+    "test:deploy:macos": "./scripts/test-deploy-macos.sh",
+    "check:main-only": "./scripts/check-main-only-git.sh",
+    "install:git-hooks": "./scripts/install-git-hooks.sh",
+    "test:main-only": "./scripts/test-main-only-git.sh"
+  }
+}

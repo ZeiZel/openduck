@@ -1,0 +1,19 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"worker-result.v1",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["schema_version","status","claims","change_refs","verification","deviations","residual_risks","capabilities_used","audit_refs","completed_at"],
+  "properties":{
+    "schema_version":{"const":"worker-result.v1"},
+    "status":{"const":"completed"},
+    "claims":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["claim","evidence_refs"],"properties":{"claim":{"type":"string","minLength":1},"evidence_refs":{"type":"array","items":{"type":"string"}}}}},
+    "change_refs":{"type":"array","items":{"type":"string"}},
+    "verification":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["check_id","command_ref","exit_code","output_ref"],"properties":{"check_id":{"type":"string","minLength":1},"command_ref":{"type":"string","minLength":1},"exit_code":{"const":0},"output_ref":{"type":"string","minLength":1}}}},
+    "deviations":{"type":"array","items":{"type":"string"}},
+    "residual_risks":{"type":"array","items":{"type":"string"}},
+    "capabilities_used":{"type":"array","items":{"type":"string"}},
+    "audit_refs":{"type":"array","items":{"type":"string"}},
+    "completed_at":{"type":"string","format":"date-time"}
+  }
+}

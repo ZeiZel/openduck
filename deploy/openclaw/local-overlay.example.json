@@ -1,0 +1,12 @@
+{
+  "workspace": "",
+  "stateDirectory": "",
+  "corporateSources": {
+    "chatLabel": "Enterprise Chat",
+    "taskTracker": { "endpoint": "", "workspace": "" }
+  },
+  "cua": {
+    "driverPath": "",
+    "allowedBundles": []
+  }
+}

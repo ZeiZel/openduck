@@ -1,0 +1,4 @@
+.openduck/ansible-logs/
+.openduck/ansible-tmp/
+*.retry
+*.log
