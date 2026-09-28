@@ -16,7 +16,6 @@ grep -qx -- '--release-id' "$tmp/stage-args"
 
 bundle="$tmp/bundle"; mkdir -p "$bundle/stage" "$bundle/release"; helper="$tmp/pretrusted-helper"; printf x > "$helper"; chmod 700 "$helper"
 fixed_root="$tmp/fixed-root"; mkdir -p "$fixed_root"; trust_anchor="$tmp/fixed-root.release-trust.v1.json"; printf '{}' > "$trust_anchor"
-local_dir="$tmp/local-overlay"; mkdir -p "$local_dir"; printf '{}' > "$local_dir/config.json"; printf '{}' > "$local_dir/local-overlay.json"; chmod 600 "$local_dir/config.json" "$local_dir/local-overlay.json"
 printf '%s' '{"release_id":"release-test","release_version":"1.0.0","run_id":"aaaaaaaa-1111","activation":"false","operation":"deploy","release_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expires_at":"2099-01-01T00:00:00Z"}' > "$bundle/release/openduck.release-signing-request.v1.json"
 printf '{}' > "$bundle/release/openduck.release-manifest.v2.json"; printf '{}' > "$tmp/signature.json"
 # Canonical member order (schema, keys, revoked) is part of the trust contract.
@@ -34,19 +33,10 @@ printf '%s' '{"keys":{"test-key":"7792ec65233f388b4063dc00bdd12464704de511fda32f
 if FAKE_ANSIBLE_LOG="$log" ANSIBLE_PLAYBOOK_OVERRIDE="$ansible_fake" "$script" bootstrap-trust --acknowledge-trust-bootstrap --trust-bundle "$tmp/trust-alphabetical.json" --trust-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --bootstrap-helper "$helper" --bootstrap-helper-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >/dev/null 2>&1; then exit 1; fi
 [[ ! -s "$log" ]]
 : > "$log"
-args=(apply --bundle "$bundle" --release-digest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --signature "$tmp/signature.json" --trust-bundle "$tmp/trust.json" --bootstrap-helper "$helper" --bootstrap-helper-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --require-local-openclaw-config --recover-partial-install --readiness-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)
-FAKE_ANSIBLE_LOG="$log" GO_BIN_OVERRIDE="$go_fake" ANSIBLE_PLAYBOOK_OVERRIDE="$ansible_fake" OPENDUCK_FIXED_ROOT_OVERRIDE="$fixed_root" OPENDUCK_TRUST_ANCHOR_OVERRIDE="$trust_anchor" OPENDUCK_LOCAL_CONFIG_DIR_OVERRIDE="$local_dir" "$script" "${args[@]}"
+args=(apply --bundle "$bundle" --release-digest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --signature "$tmp/signature.json" --trust-bundle "$tmp/trust.json" --bootstrap-helper "$helper" --bootstrap-helper-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --recover-partial-install --readiness-sha256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)
+FAKE_ANSIBLE_LOG="$log" GO_BIN_OVERRIDE="$go_fake" ANSIBLE_PLAYBOOK_OVERRIDE="$ansible_fake" OPENDUCK_FIXED_ROOT_OVERRIDE="$fixed_root" OPENDUCK_TRUST_ANCHOR_OVERRIDE="$trust_anchor" "$script" "${args[@]}"
 [[ $(wc -l < "$log" | tr -d ' ') == 4 ]]; [[ $(sed -n '1p' "$log") == --check* ]]; [[ $(sed -n '2p' "$log") == --ask-become-pass* ]]; [[ $(sed -n '3p' "$log") == --check*ask-become-pass* ]]; [[ $(sed -n '4p' "$log") == --ask-become-pass* ]]
 [[ $(grep -c -- '--ask-become-pass' "$log") == 3 ]]; [[ $(grep -c sudo "$log") == 0 ]]
-rm "$local_dir/config.json"
-if OPENDUCK_LOCAL_CONFIG_DIR_OVERRIDE="$local_dir" OPENDUCK_TRUST_ANCHOR_OVERRIDE="$trust_anchor" "$script" "${args[@]}" >/dev/null 2>&1; then exit 1; fi
-printf '{bad' > "$local_dir/config.json"; chmod 600 "$local_dir/config.json"
-if OPENDUCK_LOCAL_CONFIG_DIR_OVERRIDE="$local_dir" OPENDUCK_TRUST_ANCHOR_OVERRIDE="$trust_anchor" "$script" "${args[@]}" >/dev/null 2>&1; then exit 1; fi
-printf '{}' > "$local_dir/config.json"; chmod 644 "$local_dir/config.json"
-if OPENDUCK_LOCAL_CONFIG_DIR_OVERRIDE="$local_dir" OPENDUCK_TRUST_ANCHOR_OVERRIDE="$trust_anchor" "$script" "${args[@]}" >/dev/null 2>&1; then exit 1; fi
-chmod 600 "$local_dir/config.json"; rm "$local_dir/local-overlay.json"; ln -s config.json "$local_dir/local-overlay.json"
-if OPENDUCK_LOCAL_CONFIG_DIR_OVERRIDE="$local_dir" OPENDUCK_TRUST_ANCHOR_OVERRIDE="$trust_anchor" "$script" "${args[@]}" >/dev/null 2>&1; then exit 1; fi
-
 printf wrong > "$bundle/release/openduck.release-envelope.v1.json"
 if FAKE_ANSIBLE_LOG="$tmp/no-log" GO_BIN_OVERRIDE="$go_fake" ANSIBLE_PLAYBOOK_OVERRIDE="$ansible_fake" OPENDUCK_FIXED_ROOT_OVERRIDE="$fixed_root" OPENDUCK_TRUST_ANCHOR_OVERRIDE="$trust_anchor" "$script" "${args[@]}" >/dev/null 2>&1; then exit 1; fi
 [[ ! -e "$tmp/no-log" ]]

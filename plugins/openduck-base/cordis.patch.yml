@@ -1,0 +1,9 @@
+# Generic OpenDuck composition. The base service stays deployment-neutral;
+# Controller adapters are supplied by a separately authenticated overlay.
+- insert:
+    - id: openduck-base
+      name: '@openduck/openduck-base'
+      config:
+        controller:
+          enabled: false
+        externalPackages: []

@@ -31,7 +31,7 @@ func (p *projector) IngestSignal(_ context.Context, id string, s harness.TaskSig
 
 func event(text string) core.InboundEvent {
 	now := time.Now().UTC()
-	return core.InboundEvent{ID: "evt-1", Text: text, Classification: core.L1, Provenance: core.Provenance{AdapterID: "openclaw-synthetic", AccountID: "account-synthetic", SourceEventID: "source-1", SchemaVersion: "1.0", TraceID: "trace-1", Channel: "synthetic", ConversationID: "conversation-1", Sender: "sender", Timestamp: now, Version: 1, Digest: "sha256:fixture", Timezone: "UTC", IngestedAt: now}}
+	return core.InboundEvent{ID: "evt-1", Text: text, Classification: core.L1, Provenance: core.Provenance{AdapterID: "synthetic-sensor", AccountID: "account-synthetic", SourceEventID: "source-1", SchemaVersion: "1.0", TraceID: "trace-1", Channel: "synthetic", ConversationID: "conversation-1", Sender: "sender", Timestamp: now, Version: 1, Digest: "sha256:fixture", Timezone: "UTC", IngestedAt: now}}
 }
 
 func TestSyntheticEventAuthenticatesQueuesAndProjects(t *testing.T) {

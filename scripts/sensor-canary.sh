@@ -27,7 +27,7 @@ if [ "$ready" -ne 1 ]; then
   echo "sensor canary: controller not ready" >&2
   exit 1
 fi
-ack=$(printf '%s\n' '{"id":"evt-synthetic-canary","text":"Synthetic status request for canary.","classification":"L1","provenance":{"adapter_id":"openclaw-synthetic","account_id":"account-synthetic","source_event_id":"source-synthetic-canary","schema_version":"1.0","trace_id":"trace-synthetic-canary","channel":"synthetic","conversation_id":"conversation-synthetic","sender":"fixture","timestamp":"2026-08-13T00:00:00Z","version":1,"digest":"sha256:synthetic","timezone":"UTC","ingested_at":"2026-08-13T00:00:00Z"}}' | "$BIN/openduck-sensor-sidecar")
+ack=$(printf '%s\n' '{"id":"evt-synthetic-canary","text":"Synthetic status request for canary.","classification":"L1","provenance":{"adapter_id":"synthetic-sensor","account_id":"account-synthetic","source_event_id":"source-synthetic-canary","schema_version":"1.0","trace_id":"trace-1","channel":"synthetic","conversation_id":"conversation-synthetic","sender":"fixture","timestamp":"2026-08-13T00:00:00Z","version":1,"digest":"sha256:synthetic","timezone":"UTC","ingested_at":"2026-08-13T00:00:00Z"}}' | "$BIN/openduck-sensor-sidecar")
 case "$ack" in
   *"task_"*"SIGNAL_READY"*) echo "sensor canary: PASS (synthetic task projected)" ;;
   *) echo "sensor canary: FAIL (metadata-only acknowledgement unexpected)" >&2; exit 1 ;;

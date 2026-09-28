@@ -82,7 +82,7 @@ func run(args []string) error {
 	callbackEnabled := fs.Bool("callback-enabled", false, "enable authenticated callback transport (requires explicit origin)")
 	callbackOrigin := fs.String("callback-origin", "", "exact callback browser origin")
 	originProbeEnabled := fs.Bool("origin-probe", false, "enable non-authoritative CORS origin probe")
-	sensorEnabled := fs.Bool("sensor-enabled", false, "enable authenticated synthetic OpenClaw sensor ingress")
+	sensorEnabled := fs.Bool("sensor-enabled", false, "enable authenticated synthetic sensor ingress")
 	syntheticEnabled := fs.Bool("synthetic", false, "enable provider-free synthetic mode (off by default)")
 	commandCenterEnabled := fs.Bool("command-center", false, "serve the loopback synthetic Command Center (requires -synthetic)")
 	ownerChat := fs.Bool("owner-chat", false, "compose authenticated typed owner chat with production admission")

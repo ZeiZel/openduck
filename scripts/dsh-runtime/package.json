@@ -1,0 +1,8 @@
+{
+  "name": "openduck-dsh-runtime",
+  "private": true,
+  "description": "Pinned native DeepSeek Harness runtime used by scripts/dsh-install.sh",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.0-rc.7"
+  }
+}

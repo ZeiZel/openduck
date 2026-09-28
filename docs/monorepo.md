@@ -16,7 +16,7 @@ units, not nested repositories.
 | `projects/`, `docs/`, `memory/` | Specifications, decisions, evidence, and traceability |
 
 The root Bun workspace (`package.json` `workspaces`) includes only `plugins/*`. Do not add `third_party/deepseek-harness`,
-`profiles/dsh`, or `deploy/openclaw` to it: each has a deliberately pinned dependency boundary.
+`profiles/dsh` or an external harness plugin to it: each has a deliberately pinned dependency boundary.
 
 ## Plugin release boundary
 
@@ -28,7 +28,7 @@ change that it requires.
 
 ## Local state and safety
 
-`.openduck/`, `.openclaw-state/`, encrypted stores, credentials, logs, caches, binaries, and backup
+`.openduck/`, local runtime state, encrypted stores, credentials, logs, caches, binaries, and backup
 files are local runtime artifacts. They must not be staged. The ignore rules intentionally preserve
 source configuration and dependency lockfiles; use committed templates rather than real credentials.
 

@@ -26,13 +26,4 @@ if [ -n "$files" ]; then
   fi
 fi
 
-if git ls-files --error-unmatch deploy/openclaw/config.json >/dev/null 2>&1; then
-  echo 'deploy/openclaw/config.json must be local and untracked' >&2
-  exit 1
-fi
-git check-ignore -q deploy/openclaw/config.json
-test -f deploy/openclaw/config.example.json
-x=$(printf '\\x78'); five=$(printf '\\x35'); rooms=$(printf '\\x72\\x6f\\x6f\\x6d\\x73'); rent=$(printf '\\x72\\x65\\x6e\\x74\\x76\\x65\\x72\\x73\\x65'); kaiten=$(printf '\\x6b\\x61\\x69\\x74\\x65\\x6e'); host=$(printf '\\x72\\x75'); owner=$(printf '\\x76\\x61\\x6c\\x65\\x72\\x79\\x6c\\x76\\x6f\\x76'); home=$(printf '/%s/%s' "$(printf '\\x55\\x73\\x65\\x72\\x73')" "$owner"); bundle=$(printf '\\x72\\x75\\x2e\\x75\\x6e\\x6c\\x69\\x6d\\x69\\x74\\x65\\x64\\x74\\x65\\x63\\x68\\x2e\\x65\\x78\\x70\\x72\\x65\\x73\\x73\\x2e\\x64\\x65\\x73\\x6b\\x74\\x6f\\x70')
-pattern="${x}${five}${rooms}|${rent}|${kaiten}\\.${x}${five}\\.${host}|@${x}${five}\\.${host}|${home}|/projects/${x}${five}/|${bundle}|(^|[^[:alnum:]])${x}${five}([^[:alnum:]]|$)"
-! rg -n -i "$pattern" deploy/openclaw/config.example.json
 echo 'tracked domain safety: ok'

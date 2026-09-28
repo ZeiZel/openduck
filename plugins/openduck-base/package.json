@@ -1,0 +1,16 @@
+{
+  "name": "@openduck/openduck-base",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenDuck's generic native DeepSeek Harness base bundle; external work plugins compose above it.",
+  "main": "./src/index.js",
+  "exports": { ".": "./src/index.js", "./contract": "./src/contract.js" },
+  "files": ["src", "cordis.patch.yml", "README.md"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "dependencies": {
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.7",
+    "@deepseek-ai/schemastery": "3.18.1"
+  },
+  "scripts": { "test": "node --test test/*.test.mjs", "typecheck": "for file in src/*.js test/*.mjs; do node --check \"$file\"; done" }
+}

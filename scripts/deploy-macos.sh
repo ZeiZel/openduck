@@ -22,7 +22,7 @@ Usage:
     [--provider-source PROVIDER=DIR ...]
   bun run deploy:macos -- apply --bundle DIR --release-digest SHA256
     --signature FILE --trust-bundle FILE --bootstrap-helper FILE
-    --bootstrap-helper-sha256 SHA256 [--require-local-openclaw-config]
+    --bootstrap-helper-sha256 SHA256
     [--recover-partial-install --readiness-sha256 SHA256]
 EOF
 }
@@ -118,14 +118,13 @@ PY
   exit 0
 fi
 
-bundle= release_digest= signature= trust_bundle= bootstrap_helper= bootstrap_digest= readiness_digest= recover=false require_local=false
+bundle= release_digest= signature= trust_bundle= bootstrap_helper= bootstrap_digest= readiness_digest= recover=false
 while (($#)); do
   case "$1" in
     --bundle) bundle=${2:?missing value}; shift 2;; --release-digest) release_digest=${2:?missing value}; shift 2;;
     --signature) signature=${2:?missing value}; shift 2;; --trust-bundle) trust_bundle=${2:?missing value}; shift 2;;
     --bootstrap-helper) bootstrap_helper=${2:?missing value}; shift 2;; --bootstrap-helper-sha256) bootstrap_digest=${2:?missing value}; shift 2;;
     --recover-partial-install) recover=true; shift;; --readiness-sha256) readiness_digest=${2:?missing value}; shift 2;;
-    --require-local-openclaw-config) require_local=true; shift;;
     -h|--help) usage; exit 0;; *) die "unknown apply option: $1";;
   esac
 done
@@ -136,21 +135,6 @@ for path in "$bundle" "$signature" "$trust_bundle" "$bootstrap_helper"; do is_ab
 [[ -f "$TRUST_ANCHOR" && ! -L "$TRUST_ANCHOR" ]] || die "fixed release trust anchor is absent; run bootstrap-trust first"
 if $recover; then
   [[ -f "$TRUST_ANCHOR" && ! -L "$TRUST_ANCHOR" ]] || die "partial recovery is unsupported until the fixed release trust anchor is bootstrapped"
-fi
-if $require_local; then
-  local_config_dir="${OPENDUCK_LOCAL_CONFIG_DIR_OVERRIDE:-$ROOT_DIR/deploy/openclaw}"
-  python3 - "$local_config_dir/config.json" "$local_config_dir/local-overlay.json" <<'PY'
-import json, os, pathlib, stat, sys
-for value in sys.argv[1:]:
-    p=pathlib.Path(value)
-    if not p.is_absolute() or '..' in p.parts or p.is_symlink() or not p.is_file(): raise SystemExit('local overlay must be a regular file')
-    cur=pathlib.Path(p.anchor)
-    for part in p.parts[1:]:
-        cur /= part
-        if cur.is_symlink(): raise SystemExit('local overlay path contains symlink')
-    if stat.S_IMODE(p.stat().st_mode) & 0o077 or p.stat().st_uid != os.getuid(): raise SystemExit('local overlay must be owner-private')
-    with p.open(encoding='utf-8') as f: json.load(f)
-PY
 fi
 metadata=$(python3 - "$bundle" "$signature" "$trust_bundle" "$bootstrap_helper" "$release_digest" <<'PY'
 import json, os, pathlib, sys

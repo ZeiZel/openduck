@@ -1,5 +1,5 @@
 // Package sensor contains the narrow, local-only ingress boundary for the
-// OpenClaw sensor. It accepts authenticated synthetic events and emits only a
+// local sensor. It accepts authenticated synthetic events and emits only a
 // typed TaskSignal to the Controller. The sensor is never a source of effect
 // authority or a model/tool surface.
 package sensor
@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	EnvelopeSchema = "openclaw-sensor-envelope.v1"
+	EnvelopeSchema = "sensor-envelope.v1"
 	PolicyVersion  = "sensor-ingress.v1"
 	MaxBodyBytes   = 64 << 10
 )
@@ -81,7 +81,7 @@ func DeriveKeys(master []byte) (sensorHMAC, queueKey []byte, err error) {
 	return derive("sensor-hmac"), derive("sensor-queue"), nil
 }
 
-// Client is the narrow sender seam used by an OpenClaw sensor process. It
+// Client is the narrow sender seam used by a sensor process. It
 // owns the signing key but exposes no key material to the caller.
 type Client struct {
 	key        []byte

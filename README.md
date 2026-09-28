@@ -1,10 +1,10 @@
 # OpenDuck
 
-Репозиторий содержит спецификацию и локальное synthetic-ядро приватного ассистента. Реальных интеграций OpenClaw, подключённых аккаунтов, исходящих запросов, фоновой слежки и cloud-маршрута пока нет.
+OpenDuck содержит Controller и независимые плагины для native DeepSeek Harness. Native DSH отвечает за модель, сессии и web-поверхность; Controller-интеграции OpenDuck остаются явно отключёнными до аутентифицированной настройки.
 
-Основной пакет: [Private OpenClaw Assistant](projects/openduck/tasks/personal-assistant/private-openclaw-assistant/README.md).
+Основная установка: [Native DeepSeek Harness](docs/dsh-install.md).
 
-До прохождения decision gates и проверок безопасности запрещено предоставлять системе доступ к реальным чатам, календарям, звонкам и tech-base.
+Рабочие интеграции конкретной компании подключаются отдельным внешним пакетом, например `dsh-process`, через штатную команду управления профилем. Секреты не входят в репозиторий.
 
 ## Monorepo layout
 

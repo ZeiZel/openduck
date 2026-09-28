@@ -9,6 +9,8 @@
 # Source configuration and dependency lockfiles are intentionally not ignored.
 .openduck/
 .openclaw-state/
+.dsh-runtime/
+.dsh-home/
 deploy/openclaw/config.json
 deploy/openclaw/local-overlay.json
 deploy/openclaw/cua-driver-overlay.json

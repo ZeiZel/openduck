@@ -1,4 +1,8 @@
-# OpenClaw runtime evidence
+# Historical OpenClaw runtime evidence (retired)
+
+This record describes the retired runtime and is retained for provenance only;
+it is not an installation or deployment instruction for the current OpenDuck
+base.
 
 - Package: `openclaw@2026.7.1-2`; npm lockfile records the resolved package integrity.
 - Config: `deploy/openclaw/config.json`; validated with `openclaw config validate`.

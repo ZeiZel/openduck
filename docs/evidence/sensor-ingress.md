@@ -1,4 +1,4 @@
-# Synthetic OpenClaw sensor ingress
+# Synthetic sensor ingress
 
 The Controller has an opt-in `-sensor-enabled` composition path. It mounts the
 local-only `POST /v1/sensor/events` endpoint and wires it to a purpose-derived
@@ -29,7 +29,7 @@ process restart, and fail closed on decode/integrity/commit uncertainty.
 
 `cmd/openduck-sensor-sidecar` is the bounded sender seam: it reads one or more
 synthetic `InboundEvent` objects from stdio, obtains the Keychain secret itself,
-and can only call the fixed loopback endpoint. The OpenClaw model receives no
-key and cannot forge an envelope. No OpenClaw model tool can access this
+and can only call the fixed loopback endpoint. A model receives no key and
+cannot forge an envelope. No model tool can access this
 transport. No real accounts, chat
 credentials, outbound network, or external effects are enabled by this change.

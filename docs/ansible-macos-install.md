@@ -85,11 +85,9 @@ or symlink paths, staged helpers as authority, mismatched release digests,
 pre-existing envelopes, expired requests, and activation requests. It never
 reads credentials or invokes sudo; Ansible prompts for the become password.
 
-Boundary deployment does not materialize local OpenClaw/domain configuration.
-Those files remain manually provisioned ignored inputs. If desired, add
-`--require-local-openclaw-config`; the wrapper then checks (without printing or
-copying) owner-private strict JSON files `deploy/openclaw/config.json` and
-`deploy/openclaw/local-overlay.json` before finalization.
+Boundary deployment does not materialize domain-specific plugin configuration.
+Those files remain external, manually provisioned inputs and are outside the
+signed OpenDuck base release.
 
 For non-mutating delivery validation, run `scripts/verify-ansible-p5.sh --ci`
 from the repository root. It lint-checks the tree and runs `--syntax-check`

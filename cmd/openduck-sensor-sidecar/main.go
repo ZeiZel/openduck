@@ -1,5 +1,5 @@
 // Command openduck-sensor-sidecar is a bounded stdio bridge for a read-only
-// OpenClaw sensor. The sensor supplies synthetic InboundEvent JSON on stdin;
+// local sensor. The sensor supplies synthetic InboundEvent JSON on stdin;
 // this process obtains the signing key from Keychain and talks only to the
 // fixed loopback Controller endpoint. No key or raw envelope is printed.
 package main
