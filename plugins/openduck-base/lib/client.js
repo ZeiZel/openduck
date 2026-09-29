@@ -75,8 +75,8 @@ __export(exports_client, {
   inject: () => inject
 });
 module.exports = __toCommonJS(exports_client);
-var import_dsh_client_ui_primitives4 = require("@deepseek-ai/dsh-client-ui-primitives");
-var import_react4 = __toESM(require("react"), 1);
+var import_dsh_client_ui_primitives5 = require("@deepseek-ai/dsh-client-ui-primitives");
+var import_react5 = __toESM(require("react"), 1);
 
 // src/client/OpenDuckSettingsCard.tsx
 var import_react = __toESM(require("react"), 1);
@@ -90,32 +90,43 @@ function normalizedCliRoot(value) {
   return { enabled: value.enabled === true, cwd: value.cwd ?? "", models: { codex: value.models?.codex ?? [], claude: value.models?.claude ?? [], kimi: value.models?.kimi ?? [] } };
 }
 async function saveAcceptedHistory(scope, projects) {
-  await scope.set("history", { projects });
-  const accepted = scope.getSnapshot().value.history?.projects ?? [];
+  if (!await scope.set("history", { projects }))
+    return false;
+  const accepted = scope.getSnapshot().value?.history?.projects ?? [];
   return JSON.stringify(normalized(accepted)) === JSON.stringify(normalized(projects));
 }
 async function saveAcceptedCliRoot(scope, cliRoot) {
-  await scope.set("cliRoot", cliRoot);
-  return JSON.stringify(normalizedCliRoot(scope.getSnapshot().value.cliRoot ?? {})) === JSON.stringify(normalizedCliRoot(cliRoot));
+  if (!await scope.set("cliRoot", cliRoot))
+    return false;
+  return JSON.stringify(normalizedCliRoot(scope.getSnapshot().value?.cliRoot ?? {})) === JSON.stringify(normalizedCliRoot(cliRoot));
 }
 
 // src/client/OpenDuckSettingsCard.tsx
 var rootIsValid = (root) => /^\/(?:[^/\0]+\/?)*$/.test(root) && !root.includes("/../") && !root.endsWith("/..");
 var cliRootOf = (value) => ({ enabled: value?.enabled === true, cwd: value?.cwd ?? "", models: { codex: value?.models?.codex ?? [], claude: value?.models?.claude ?? [], kimi: value?.models?.kimi ?? [] } });
-var OpenDuckSettingsCard = ({ scope }) => {
+function statusItems(value) {
+  if (value === null || typeof value !== "object" || !Array.isArray(value.items))
+    return [];
+  return value.items.filter((item) => Boolean(item && typeof item === "object" && ["codex", "claude", "kimi"].includes(item.provider) && typeof item.label === "string" && typeof item.installed === "boolean" && ["authenticated", "not-signed-in", "unknown"].includes(item.auth)));
+}
+var OpenDuckSettingsCard = ({ scope, rpc }) => {
   const snapshot = import_react.useSyncExternalStore(scope.subscribe.bind(scope), scope.getSnapshot.bind(scope));
   const [root, setRoot] = import_react.useState("");
   const [pending, setPending] = import_react.useState(false);
   const [error, setError] = import_react.useState("");
-  const projects = snapshot.value.history?.projects ?? [];
-  const persistedCli = cliRootOf(snapshot.value.cliRoot);
+  const value = snapshot.value ?? {};
+  const projects = value.history?.projects ?? [];
+  const persistedCli = cliRootOf(value.cliRoot);
   const [cliDraft, setCliDraft] = import_react.useState(persistedCli);
   const [cliDirty, setCliDirty] = import_react.useState(false);
+  const [providers, setProviders] = import_react.useState([]);
+  const [providerBusy, setProviderBusy] = import_react.useState(false);
+  const [providerError, setProviderError] = import_react.useState("");
   const writable = snapshot.writable !== false;
   import_react.useEffect(() => {
     if (!cliDirty)
       setCliDraft(persistedCli);
-  }, [snapshot.value.cliRoot, cliDirty]);
+  }, [value.cliRoot, cliDirty]);
   import_react.useEffect(() => {
     if (root && projects.some((project) => project.root === root.trim())) {
       setRoot("");
@@ -153,13 +164,42 @@ var OpenDuckSettingsCard = ({ scope }) => {
       setPending(false);
     } catch {
       setPending(false);
-      setError("DSH rejected CLI root-chat settings. Choose an existing canonical workspace and at least one explicit model.");
+      setError("DSH rejected CLI root-chat settings.");
     }
   };
   const setCli = (next) => {
     setCliDraft(next);
     setCliDirty(true);
   };
+  const refreshProviders = async () => {
+    setProviderBusy(true);
+    setProviderError("");
+    try {
+      const response = await rpc.call("/api", "openduck-cli/status", {});
+      setProviders(response.ok ? statusItems(response.value) : []);
+    } catch {
+      setProviders([]);
+      setProviderError("CLI status is unavailable.");
+    } finally {
+      setProviderBusy(false);
+    }
+  };
+  const signIn = async (provider) => {
+    setProviderBusy(true);
+    setProviderError("");
+    try {
+      const response = await rpc.call("/api", "openduck-cli/login", { provider });
+      if (!response.ok)
+        setProviderError("Terminal sign-in could not start.");
+    } catch {
+      setProviderError("Terminal sign-in could not start.");
+    } finally {
+      setProviderBusy(false);
+    }
+  };
+  import_react.useEffect(() => {
+    refreshProviders();
+  }, [rpc]);
   const addProject = () => {
     const candidate = root.trim();
     if (!rootIsValid(candidate)) {
@@ -175,37 +215,35 @@ var OpenDuckSettingsCard = ({ scope }) => {
   const removeProject = (candidate) => {
     save(projects.filter((project) => project.root !== candidate));
   };
-  return /* @__PURE__ */ import_react.default.createElement("section", null, /* @__PURE__ */ import_react.default.createElement("h2", null, "OpenDuck connections"), /* @__PURE__ */ import_react.default.createElement("p", null, "Connect configured CLI subscriptions in a local terminal, then restart DSH."), /* @__PURE__ */ import_react.default.createElement("ul", null, /* @__PURE__ */ import_react.default.createElement("li", null, "Codex: ", /* @__PURE__ */ import_react.default.createElement("code", null, "make connect-codex")), /* @__PURE__ */ import_react.default.createElement("li", null, "Claude: ", /* @__PURE__ */ import_react.default.createElement("code", null, "make connect-claude")), /* @__PURE__ */ import_react.default.createElement("li", null, "Kimi ACP: ", /* @__PURE__ */ import_react.default.createElement("code", null, "make connect-kimi")), /* @__PURE__ */ import_react.default.createElement("li", null, "Computer MCP: ", /* @__PURE__ */ import_react.default.createElement("code", null, "make connect-computer"))), /* @__PURE__ */ import_react.default.createElement("p", null, "Use ", /* @__PURE__ */ import_react.default.createElement("code", null, "make doctor"), " for installed-provider readiness."), /* @__PURE__ */ import_react.default.createElement("h2", null, "CLI root chat"), /* @__PURE__ */ import_react.default.createElement("p", null, "Use ", /* @__PURE__ */ import_react.default.createElement("code", null, "make connect-cli-chat"), ", configure an explicit workspace and model allowlist, save this section, then restart DSH. This fixed workspace applies to every CLI root-chat turn. Root chat is text-only: DSH host-tool schemas are dropped and DSH tools cannot run in this mode."), /* @__PURE__ */ import_react.default.createElement("label", null, /* @__PURE__ */ import_react.default.createElement("input", {
+  return /* @__PURE__ */ import_react.default.createElement("section", null, /* @__PURE__ */ import_react.default.createElement("h2", null, "CLI subscriptions"), /* @__PURE__ */ import_react.default.createElement("p", null, "Installed Codex, Claude and Kimi CLIs are detected automatically; no connection step is needed for chat. Pick one of their models in a new chat. Optional delegation and Computer MCP overlays still use ", /* @__PURE__ */ import_react.default.createElement("code", null, "make connect-codex"), ", ", /* @__PURE__ */ import_react.default.createElement("code", null, "make connect-claude"), ", ", /* @__PURE__ */ import_react.default.createElement("code", null, "make connect-kimi"), " and ", /* @__PURE__ */ import_react.default.createElement("code", null, "make connect-computer"), "."), /* @__PURE__ */ import_react.default.createElement("h2", null, "CLI root chat"), /* @__PURE__ */ import_react.default.createElement("p", null, "Installed Codex, Claude, and Kimi CLIs appear with their configured default model. Select a CLI model in a blank session and OpenDuck switches it to the CLI root preset. Each turn uses that session’s selected workspace. Root chat is text-only: host-tool schemas are never sent to a subscription CLI and DSH tools cannot run in this mode."), /* @__PURE__ */ import_react.default.createElement("label", null, /* @__PURE__ */ import_react.default.createElement("input", {
     type: "checkbox",
     checked: cliDraft.enabled,
     disabled: !writable || pending,
     onChange: (event) => setCli({ ...cliDraft, enabled: event.target.checked })
-  }), " Enable CLI root chat"), /* @__PURE__ */ import_react.default.createElement("label", null, "Workspace directory ", /* @__PURE__ */ import_react.default.createElement(import_dsh_client_ui_primitives.Input, {
-    value: cliDraft.cwd,
-    disabled: !writable || pending,
-    onChange: (event) => setCli({ ...cliDraft, cwd: event.target.value }),
-    placeholder: "/canonical/project"
-  })), /* @__PURE__ */ import_react.default.createElement("label", null, "Codex model ", /* @__PURE__ */ import_react.default.createElement(import_dsh_client_ui_primitives.Input, {
-    value: cliDraft.models.codex[0] ?? "",
-    disabled: !writable || pending,
-    onChange: (event) => setCli({ ...cliDraft, models: { ...cliDraft.models, codex: event.target.value ? [event.target.value] : [] } }),
-    placeholder: "default or installed CLI model id"
-  })), /* @__PURE__ */ import_react.default.createElement("label", null, "Claude model ", /* @__PURE__ */ import_react.default.createElement(import_dsh_client_ui_primitives.Input, {
-    value: cliDraft.models.claude[0] ?? "",
-    disabled: !writable || pending,
-    onChange: (event) => setCli({ ...cliDraft, models: { ...cliDraft.models, claude: event.target.value ? [event.target.value] : [] } }),
-    placeholder: "default or installed CLI model id"
-  })), /* @__PURE__ */ import_react.default.createElement("label", null, "Kimi route label ", /* @__PURE__ */ import_react.default.createElement(import_dsh_client_ui_primitives.Input, {
-    value: cliDraft.models.kimi[0] ?? "",
-    disabled: !writable || pending,
-    onChange: (event) => setCli({ ...cliDraft, models: { ...cliDraft.models, kimi: event.target.value ? [event.target.value] : [] } }),
-    placeholder: "default (Kimi ACP configured default)"
-  })), /* @__PURE__ */ import_react.default.createElement(import_dsh_client_ui_primitives.Button, {
+  }), " Enable CLI root chat"), /* @__PURE__ */ import_react.default.createElement(import_dsh_client_ui_primitives.Button, {
     disabled: !writable || pending || !cliDirty,
     onClick: () => {
       saveCli();
     }
-  }, "Save CLI root chat"), /* @__PURE__ */ import_react.default.createElement("h2", null, "External history projects"), /* @__PURE__ */ import_react.default.createElement("p", null, "Only exact existing project directories listed here can be queried by the read-only history viewer."), snapshot.status && snapshot.status !== "ready" && /* @__PURE__ */ import_react.default.createElement("p", {
+  }, "Save CLI root chat"), /* @__PURE__ */ import_react.default.createElement("p", null, "Changes to this switch take effect when DSH restarts."), /* @__PURE__ */ import_react.default.createElement("div", {
+    style: { display: "grid", gap: 6, marginTop: 10 }
+  }, /* @__PURE__ */ import_react.default.createElement("strong", null, "CLI sign-in"), /* @__PURE__ */ import_react.default.createElement(import_dsh_client_ui_primitives.Button, {
+    disabled: providerBusy,
+    onClick: () => {
+      refreshProviders();
+    }
+  }, "Refresh CLI status"), providers.length === 0 && !providerBusy && /* @__PURE__ */ import_react.default.createElement("p", {
+    role: "status"
+  }, "No installed CLI status is available yet."), providers.map((provider) => /* @__PURE__ */ import_react.default.createElement("div", {
+    key: provider.provider
+  }, provider.label, ": ", !provider.installed ? "not installed" : provider.auth === "authenticated" ? "signed in" : provider.auth === "not-signed-in" ? "sign-in required" : "status unavailable", " ", provider.installed && provider.auth !== "authenticated" && /* @__PURE__ */ import_react.default.createElement(import_dsh_client_ui_primitives.Button, {
+    disabled: providerBusy,
+    onClick: () => {
+      signIn(provider.provider);
+    }
+  }, provider.auth === "unknown" ? "Sign in" : "Open sign-in"))), providerError && /* @__PURE__ */ import_react.default.createElement("p", {
+    role: "alert"
+  }, providerError)), /* @__PURE__ */ import_react.default.createElement("h2", null, "External history projects"), /* @__PURE__ */ import_react.default.createElement("p", null, "Only exact existing project directories listed here can be queried by the read-only history viewer."), snapshot.status && snapshot.status !== "ready" && /* @__PURE__ */ import_react.default.createElement("p", {
     role: "status"
   }, "Settings are ", snapshot.status, "."), !writable && /* @__PURE__ */ import_react.default.createElement("p", {
     role: "status"
@@ -277,7 +315,7 @@ var HistoryViewer = ({ rpc }) => {
     setLoading("projects");
     setError("");
     try {
-      const result = await rpc.call("/openduck-history", "projects", {});
+      const result = await rpc.call("/api", "openduck-history/projects", {});
       const resultPage = page(result.value, validProject);
       if (!result.ok || !resultPage || id !== requestId.current)
         throw new Error;
@@ -302,7 +340,7 @@ var HistoryViewer = ({ rpc }) => {
     setLoading("sessions");
     setError("");
     try {
-      const result = await rpc.call("/openduck-history", "sessions", { projectId, provider, limit: 25, ...cursor ? { cursor } : {} });
+      const result = await rpc.call("/api", "openduck-history/sessions", { projectId, provider, limit: 25, ...cursor ? { cursor } : {} });
       const resultPage = page(result.value, validSession);
       if (!result.ok || !resultPage || id !== requestId.current)
         throw new Error;
@@ -326,7 +364,7 @@ var HistoryViewer = ({ rpc }) => {
     setLoading("messages");
     setError("");
     try {
-      const result = await rpc.call("/openduck-history", "messages", { projectId, provider, sessionId, limit: 100, ...cursor ? { cursor } : {} });
+      const result = await rpc.call("/api", "openduck-history/messages", { projectId, provider, sessionId, limit: 100, ...cursor ? { cursor } : {} });
       const resultPage = page(result.value, validMessage);
       if (!result.ok || !resultPage || id !== requestId.current)
         throw new Error;
@@ -429,28 +467,166 @@ var HistorySidebarAction = ({ rpc, wide }) => {
   })));
 };
 
+// src/client/CliRootAuthAction.tsx
+var import_react4 = __toESM(require("react"), 1);
+var import_dsh_client_ui_primitives4 = require("@deepseek-ai/dsh-client-ui-primitives");
+var routeProvider = { "codex-cli": "codex", "claude-cli": "claude", "kimi-acp": "kimi" };
+var labels = { codex: "Codex", claude: "Claude", kimi: "Kimi" };
+function authFor(value, provider) {
+  if (value === null || typeof value !== "object" || !Array.isArray(value.items))
+    return;
+  const item = value.items.find((entry) => entry !== null && typeof entry === "object" && entry.provider === provider);
+  const auth = item !== null && typeof item === "object" ? item.auth : undefined;
+  return auth === "authenticated" || auth === "not-signed-in" || auth === "unknown" ? auth : undefined;
+}
+var observedProvider = new Map;
+var CliRootAuthAction = ({ sessionId, modelDirectories, sessions, presets, rpc }) => {
+  const [notice, setNotice] = import_react4.useState();
+  const launched = import_react4.useRef(new Set);
+  const selectionEpoch = import_react4.useRef(0);
+  import_react4.useEffect(() => {
+    let directory;
+    try {
+      directory = modelDirectories.directoryFor(sessionId);
+    } catch {
+      return;
+    }
+    let alive = true;
+    const selectRootPreset = async (epoch, quiet = false) => {
+      if (!alive || epoch !== selectionEpoch.current)
+        return false;
+      const refuse = () => {
+        if (alive && !quiet)
+          setNotice({ kind: "new-session" });
+        return false;
+      };
+      const session = sessions.list.getSnapshot().byId[sessionId];
+      if (session === undefined || !session.blank)
+        return refuse();
+      if (session.projectionValues?.agentPreset === "openduck-cli-root")
+        return true;
+      try {
+        const response = await presets.agentPresets.select(sessionId, "openduck-cli-root");
+        if (!alive || epoch !== selectionEpoch.current)
+          return false;
+        return response.ok ? true : refuse();
+      } catch {
+        return refuse();
+      }
+    };
+    const inspect = () => {
+      const state = directory.store.getSnapshot();
+      if (state.status !== "ready")
+        return;
+      const current = state.current?.provider ?? null;
+      const hadBaseline = observedProvider.has(sessionId);
+      const previous = observedProvider.get(sessionId);
+      observedProvider.set(sessionId, current);
+      const changed = hadBaseline && previous !== current;
+      const provider = routeProvider[current ?? ""];
+      if (provider === undefined)
+        return;
+      if (!changed) {
+        const session = sessions.list.getSnapshot().byId[sessionId];
+        if (session?.blank === true && session.projectionValues?.agentPreset !== "openduck-cli-root")
+          selectRootPreset(++selectionEpoch.current, true);
+        return;
+      }
+      const epoch = ++selectionEpoch.current;
+      (async () => {
+        if (!await selectRootPreset(epoch) || !alive || epoch !== selectionEpoch.current)
+          return;
+        try {
+          const response = await rpc.call("/api", "openduck-cli/status", {});
+          const auth = response.ok ? authFor(response.value, provider) : undefined;
+          if (!alive || epoch !== selectionEpoch.current || auth === undefined || auth === "authenticated")
+            return;
+          if (auth === "not-signed-in" && !launched.current.has(provider)) {
+            launched.current.add(provider);
+            const login = await rpc.call("/api", "openduck-cli/login", { provider });
+            if (!alive || epoch !== selectionEpoch.current)
+              return;
+            if (!login.ok) {
+              setNotice({ kind: "auth", provider, auth, launched: false, failed: true });
+              return;
+            }
+            setNotice({ kind: "auth", provider, auth, launched: true });
+            return;
+          }
+          setNotice({ kind: "auth", provider, auth, launched: false });
+        } catch {
+          if (alive && epoch === selectionEpoch.current)
+            setNotice({ kind: "auth", provider, auth: "unknown", launched: false, failed: true });
+        }
+      })();
+    };
+    const stop = directory.store.subscribe(inspect);
+    inspect();
+    return () => {
+      alive = false;
+      stop();
+    };
+  }, [modelDirectories, presets, rpc, sessionId, sessions]);
+  if (notice === undefined)
+    return null;
+  if (notice.kind === "new-session")
+    return /* @__PURE__ */ import_react4.default.createElement("span", {
+      role: "status"
+    }, "Start a new OpenDuck CLI root chat to use this CLI model.");
+  if (notice.launched)
+    return /* @__PURE__ */ import_react4.default.createElement("span", {
+      role: "status"
+    }, "Finish ", labels[notice.provider], " sign-in in Terminal.");
+  return /* @__PURE__ */ import_react4.default.createElement("span", null, notice.failed && /* @__PURE__ */ import_react4.default.createElement("span", {
+    role: "alert"
+  }, "Terminal sign-in could not start. "), /* @__PURE__ */ import_react4.default.createElement(import_dsh_client_ui_primitives4.Button, {
+    onClick: () => {
+      rpc.call("/api", "openduck-cli/login", { provider: notice.provider }).then((result) => {
+        setNotice({ ...notice, launched: result.ok, failed: !result.ok });
+      }).catch(() => {
+        setNotice({ ...notice, launched: false, failed: true });
+      });
+    }
+  }, notice.auth === "unknown" ? `Sign in to ${labels[notice.provider]}` : `Open ${labels[notice.provider]} sign-in`));
+};
+
 // src/client/index.tsx
-var inject = ["slots", "connection", "settingsScope"];
+var inject = ["slots", "connection", "configForms", "remote", "remote.agentPresets", "modelDirectories", "sessions"];
 var apply = (ctx) => {
-  ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
-    name: "settings.plugin.item",
-    key: "openduck",
-    locale: "settings.plugins",
+  const form = ctx.configForms.get("openduck");
+  ctx.effect(() => ctx.configForms.whileServed(["openduck"], () => ctx.slots.inject("plugins.item", () => ctx.slots.register({
+    name: "plugins.item",
+    id: "openduck",
+    order: 30,
+    label: () => "OpenDuck",
     inject: () => ({})
-  }, () => /* @__PURE__ */ import_react4.default.createElement(OpenDuckSettingsCard, {
-    scope: ctx.settingsScope.bind({ namespace: "openduck" })
-  })));
+  }, ({ view }) => view === "summary" ? "CLI subscriptions, root chat and external history." : /* @__PURE__ */ import_react5.default.createElement(OpenDuckSettingsCard, {
+    scope: form,
+    rpc: ctx.connection.rpc
+  })))), "openduck-base.settings-page");
   ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
     name: "sidebar.footer.action",
     id: "openduck-cli-history",
     locale: "settings.plugins",
     inject: () => ({})
-  }, ({ wide }) => /* @__PURE__ */ import_react4.default.createElement(HistorySidebarAction, {
+  }, ({ wide }) => /* @__PURE__ */ import_react5.default.createElement(HistorySidebarAction, {
     rpc: ctx.connection.rpc,
     wide: wide === true
   })));
+  ctx.slots.inject("conversation.input.dock", () => ctx.slots.register({
+    name: "conversation.input.dock",
+    id: "openduck-cli-auth",
+    order: 30,
+    inject: (sessionId) => ({ dockSessionId: sessionId })
+  }, ({ dockSessionId }) => dockSessionId === undefined ? null : /* @__PURE__ */ import_react5.default.createElement(CliRootAuthAction, {
+    sessionId: dockSessionId,
+    modelDirectories: ctx.modelDirectories,
+    sessions: ctx.sessions,
+    presets: ctx.remote,
+    rpc: ctx.connection.rpc
+  })));
 };
-var NativeButton = import_dsh_client_ui_primitives4.Button;
+var NativeButton = import_dsh_client_ui_primitives5.Button;
 
     return module.exports;
   },

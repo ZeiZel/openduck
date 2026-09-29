@@ -51,13 +51,15 @@ test('CLI runners reject invalid continuations before transport launch', () => {
 })
 
 test('reserved default model delegates selection to each authenticated CLI', async () => {
-  const codexCalls = []; const codex = createCodexRunner({ transport: { start: request => { codexCalls.push(request); return { ...source([JSON.stringify({ id: 1, result: {} }), JSON.stringify({ id: 2, result: { thread: { id: 'thread-1' } } }), JSON.stringify({ id: 3, result: { turn: { id: 'turn-1' } } }), JSON.stringify({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })]), send: async () => {} } } } })
+  const codexCalls = []; const codexSent = []; const codex = createCodexRunner({ transport: { start: request => { codexCalls.push(request); return { ...source([JSON.stringify({ id: 1, result: {} }), JSON.stringify({ id: 2, result: { thread: { id: 'thread-1' } } }), JSON.stringify({ id: 3, result: { turn: { id: 'turn-1' } } }), JSON.stringify({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })]), send: async value => { codexSent.push(value) } } } } })
   const codexHandle = codex.stream({ prompt: 'x', cwd: '/work/synthetic', model: 'default' }); await collect(codexHandle.events); await codexHandle.result
   const claudeCalls = []; const claude = createClaudeRunner({ transport: { start: request => { claudeCalls.push(request); return source([JSON.stringify({ type: 'result', is_error: false, session_id: 'session-1' })]) } } })
   const claudeHandle = claude.stream({ prompt: 'x', cwd: '/work/synthetic', model: 'default' }); await collect(claudeHandle.events); await claudeHandle.result
   const kimiCalls = []; const kimi = createKimiRunner({ transport: { start: request => { kimiCalls.push(request); return { ...source([JSON.stringify({ id: 1, result: {} }), JSON.stringify({ id: 2, result: { sessionId: 'session-1' } }), JSON.stringify({ id: 3, result: {} })]), send: async () => {} } } } })
   const kimiHandle = kimi.stream({ prompt: 'x', cwd: '/work/synthetic', model: 'default' }); await collect(kimiHandle.events); await kimiHandle.result
   assert.equal(codexCalls.length, 1); assert.ok(!claudeCalls[0].args.includes('--model')); assert.deepEqual(kimiCalls[0].args, ['acp'])
+  assert.equal('model' in codexSent.find(value => value.method === 'thread/start').params, false)
+  assert.equal('model' in codexSent.find(value => value.method === 'turn/start').params, false)
 })
 
 test('Kimi ACP rejects a reverse permission request instead of exposing host capabilities', async () => {
@@ -76,4 +78,41 @@ test('Codex rejects unknown agent-message phases and Claude stops at its termina
   const broken = codex.stream({ prompt: 'x', cwd: '/work/synthetic', model: 'default' }); await assert.rejects(async () => collect(broken.events), /unsupported agent message phase/)
   const claude = createClaudeRunner({ transport: { start: () => source([JSON.stringify({ type: 'result', is_error: false, session_id: 's' }), JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'late' } })]) } })
   const complete = claude.stream({ prompt: 'x', cwd: '/work/synthetic', model: 'default' }); assert.deepEqual(await collect(complete.events), []); await complete.result
+})
+
+test('Claude Code 2.1 stream-json without partial messages yields the assistant text once (captured sample)', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const lines = (await readFile(new URL('./fixtures/claude-2.1.280-stream-json.jsonl', import.meta.url), 'utf8')).split('\n').filter(Boolean)
+  const runner = createClaudeRunner({ transport: { start: () => source(lines) } })
+  const handle = runner.stream({ prompt: 'ответь одним словом: ок', cwd: '/work/synthetic', model: 'default' })
+  assert.deepEqual(await collect(handle.events), [{ type: 'text', text: 'ок' }])
+  assert.deepEqual((await handle.result).continuation, { provider: 'claude', remoteSessionId: '00000000-0000-4000-8000-000000000001' })
+})
+
+test('Claude partial-message stream_event deltas are not duplicated by the whole assistant message', async () => {
+  const delta = text => JSON.stringify({ type: 'stream_event', session_id: 's', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } })
+  const runner = createClaudeRunner({ transport: { start: () => source([delta('о'), delta('к'), JSON.stringify({ type: 'assistant', session_id: 's', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'ок' }] } }), JSON.stringify({ type: 'result', is_error: false, result: 'ок', session_id: 's' })]) } })
+  const handle = runner.stream({ prompt: 'x', cwd: '/work/synthetic', model: 'default' })
+  assert.deepEqual((await collect(handle.events)).map(event => event.text).join(''), 'ок')
+})
+
+test('Claude result-only stream still surfaces its answer, and an error result rejects visibly', async () => {
+  const ok = createClaudeRunner({ transport: { start: () => source([JSON.stringify({ type: 'result', is_error: false, result: 'только результат', session_id: 's' })]) } })
+  const handle = ok.stream({ prompt: 'x', cwd: '/work/synthetic', model: 'default' })
+  assert.deepEqual(await collect(handle.events), [{ type: 'text', text: 'только результат' }])
+  const failed = createClaudeRunner({ transport: { start: () => source([JSON.stringify({ type: 'result', is_error: true, subtype: 'error_during_execution', result: 'Not logged in', session_id: 's' })]) } })
+  const bad = failed.stream({ prompt: 'x', cwd: '/work/synthetic', model: 'default' })
+  assert.deepEqual(await collect(bad.events), [])
+  await assert.rejects(bad.result, /Claude CLI reported an error: Not logged in/)
+})
+
+test('Codex failed turn surfaces the app-server error message (captured usage-limit shape)', async () => {
+  const runner = createCodexRunner({ transport: { start: () => ({ ...source([
+    JSON.stringify({ id: 1, result: {} }), JSON.stringify({ id: 2, result: { thread: { id: 'thread-1' } } }), JSON.stringify({ id: 3, result: { turn: { id: 'turn-1' } } }),
+    JSON.stringify({ method: 'error', params: { threadId: 'thread-1', turnId: 'turn-1', error: { message: 'You’ve hit your usage limit.', codexErrorInfo: 'usageLimitExceeded' } } }),
+    JSON.stringify({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', items: [], status: 'failed', error: { message: 'You’ve hit your usage limit.', codexErrorInfo: 'usageLimitExceeded' } } } }),
+  ]), send: async () => {} }) } })
+  const handle = runner.stream({ prompt: 'x', cwd: '/work/synthetic', model: 'default' })
+  assert.deepEqual(await collect(handle.events), [])
+  await assert.rejects(handle.result, /Codex turn failed: You’ve hit your usage limit\./)
 })

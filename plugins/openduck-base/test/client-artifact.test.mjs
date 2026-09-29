@@ -6,6 +6,10 @@ import { resolve } from 'node:path'
 test('generated native client uses only the DSH-seeded React and primitive modules', async () => {
   const source = await readFile(resolve('lib/client.js'), 'utf8')
   assert.doesNotMatch(source, /react\/jsx(?:-dev)?-runtime/)
+  assert.match(source, /configForms\.get\("openduck"\)/)
+  assert.match(source, /whileServed\(\["openduck"\]/)
+  assert.doesNotMatch(source, /noteAgentPreset/)
+  assert.match(source, /projectionValues\?\.agentPreset/)
   const requested = [...source.matchAll(/require\("([^"]+)"\)/g)].map(match => match[1])
   assert.deepEqual([...new Set(requested)].sort(), ['@deepseek-ai/dsh-client-ui-primitives', 'react'])
   let registration
@@ -15,4 +19,9 @@ test('generated native client uses only the DSH-seeded React and primitive modul
   const known = { react: { default: { createElement: () => ({}) } }, '@deepseek-ai/dsh-client-ui-primitives': { Button: () => null, Input: () => null } }
   const exports = registration.factory(name => { assert.ok(name in known, `unseeded module: ${name}`); return known[name] })
   assert.equal(typeof exports.apply, 'function')
+  // Every Typert Remote namespace the client touches must be declared, and the
+  // CLI watcher must live on the composer dock that blank chats render.
+  assert.ok(exports.inject.includes('remote.agentPresets'))
+  assert.match(source, /"conversation\.input\.dock"/)
+  assert.doesNotMatch(source, /conversation\.session\.header\.actions/)
 })

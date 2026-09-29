@@ -6,12 +6,12 @@ function normalizedCliRoot(value) {
 }
 /** Persist a history project list and confirm the settings snapshot actually accepted it. */
 export async function saveAcceptedHistory(scope, projects) {
-  await scope.set('history', { projects })
-  const accepted = scope.getSnapshot().value.history?.projects ?? []
+  if (!await scope.set('history', { projects })) return false
+  const accepted = scope.getSnapshot().value?.history?.projects ?? []
   return JSON.stringify(normalized(accepted)) === JSON.stringify(normalized(projects))
 }
 /** Persist CLI root settings and confirm the resolved snapshot accepted exactly this value. */
 export async function saveAcceptedCliRoot(scope, cliRoot) {
-  await scope.set('cliRoot', cliRoot)
-  return JSON.stringify(normalizedCliRoot(scope.getSnapshot().value.cliRoot ?? {})) === JSON.stringify(normalizedCliRoot(cliRoot))
+  if (!await scope.set('cliRoot', cliRoot)) return false
+  return JSON.stringify(normalizedCliRoot(scope.getSnapshot().value?.cliRoot ?? {})) === JSON.stringify(normalizedCliRoot(cliRoot))
 }

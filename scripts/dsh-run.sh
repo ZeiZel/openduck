@@ -13,11 +13,9 @@ if [[ -d "$PROFILE_DIR" ]]; then
     [[ -f "$patch" ]] && patches+=(--patch "$patch")
   done
 fi
-cli_root_preset="$DSH_HOME_DIR/.agent-presets/openduck-cli-root/agent.cordis.yml"
-cli_root_template="$ROOT_DIR/plugins/openduck-base/connect/cli-root-agent.cordis.yml"
-if [[ -f "$PROFILE_DIR/openduck-cli-root.enabled" ]] && cmp -s "$cli_root_preset" "$cli_root_template"; then
-  export OPENDUCK_CLI_ROOT_ENABLED=1
+if [[ -f "$PROFILE_DIR/openduck-cli-root.disabled" ]]; then
+  export OPENDUCK_CLI_ROOT_DISABLED=1
 else
-  export OPENDUCK_CLI_ROOT_ENABLED=0
+  export OPENDUCK_CLI_ROOT_DISABLED=0
 fi
 exec "$ROOT_DIR/scripts/dsh-base.sh" --profile openduck "${patches[@]}" "$@"

@@ -41,22 +41,33 @@ function publicResult(result, projectId) {
 
 export function createHistoryRpc(config, ports, options = {}) {
   const normalizeRoot = options.normalizeRoot ?? canonicalRoot
-  const projects = Object.freeze((config?.projects ?? []).map((project, index) => cleanProject(project, index, normalizeRoot)))
-  const byId = new Map(projects.map(project => [project.id, project]))
-  const history = createDefaultHistoryService({ projects: projects.map(project => ({ root: project.root, displayName: project.displayName })) }, ports)
+  const state = () => {
+    const resolved = typeof config === 'function' ? config() : config
+    const projects = Object.freeze((resolved?.projects ?? []).map((project, index) => cleanProject(project, index, normalizeRoot)))
+    return Object.freeze({
+      projects,
+      byId: new Map(projects.map(project => [project.id, project])),
+      history: createDefaultHistoryService({ projects: projects.map(project => ({ root: project.root, displayName: project.displayName })) }, ports),
+    })
+  }
+  // Preserve construction-time rejection for a fixed policy. A resolver is
+  // intentionally deferred so an accepted volatile settings update can take
+  // effect on the next RPC without retaining a stale allowlist.
+  if (typeof config !== 'function') state()
   return Object.freeze({
-    projects: () => projects.map(({ id, displayName }) => Object.freeze({ id, displayName })),
+    projects: () => state().projects.map(({ id, displayName }) => Object.freeze({ id, displayName })),
     async handle(endpoint, payload) {
       try {
         if (endpoint === 'projects') return ok({ items: this.projects() })
         if (endpoint !== 'sessions' && endpoint !== 'messages') return fail('History endpoint is unavailable')
         const input = request(payload)
-        const project = byId.get(input.projectId)
+        const current = state()
+        const project = current.byId.get(input.projectId)
         if (project === undefined) return fail('Selected project is unavailable')
         const forwarded = { provider: input.provider, projectRoot: project.root, ...(input.cursor === undefined ? {} : { cursor: input.cursor }), ...(input.limit === undefined ? {} : { limit: input.limit }) }
-        if (endpoint === 'sessions') return ok(publicResult(await history.list(forwarded), project.id))
+        if (endpoint === 'sessions') return ok(publicResult(await current.history.list(forwarded), project.id))
         if (input.sessionId === undefined) return fail('Session is required')
-        return ok(publicResult(await history.read({ ...forwarded, sessionId: input.sessionId }), project.id))
+        return ok(publicResult(await current.history.read({ ...forwarded, sessionId: input.sessionId }), project.id))
       } catch {
         return fail('History is unavailable')
       }

@@ -25,7 +25,12 @@ export function createCodexRunner({ transport, command = 'codex', args = ['app-s
       const turn = event.params?.turn
       if (event.params?.threadId !== remoteSessionId || !turn || (turnId && turn.id !== turnId)) return false
       terminal = turn
-      if (turn.status === 'completed') settle.resolve(); else settle.reject(new Error(`Codex app-server turn ended with status ${String(turn.status)}`))
+      if (turn.status === 'completed') settle.resolve()
+      else {
+        // Codex reports actionable failures (usage limit, auth, model) in turn.error.message.
+        const detail = typeof turn.error?.message === 'string' && turn.error.message.length > 0 ? `: ${turn.error.message.slice(0, 400)}` : ''
+        settle.reject(new Error(`Codex turn ${String(turn.status)}${detail}`))
+      }
       return true
     }
     const events = (async function * () {

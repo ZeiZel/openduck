@@ -35,3 +35,16 @@ test('host RPC runs a synthetic Codex stdio server and returns bounded list/read
     assert.equal(messages.ok, true); assert.deepEqual(messages.value.items.map(item => item.text), ['hello', 'world'])
   } finally { if (previous === undefined) delete process.env.OPENDUCK_SYNTHETIC_ROOT; else process.env.OPENDUCK_SYNTHETIC_ROOT = previous }
 })
+
+test('host RPC resolves the current allowlist for each request after a live settings update', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'openduck-history-live-'))
+  const firstPath = join(base, 'first'); mkdirSync(firstPath)
+  const secondPath = join(base, 'second'); mkdirSync(secondPath)
+  const first = realpathSync.native(firstPath)
+  const second = realpathSync.native(secondPath)
+  let settings = { projects: [{ root: first, displayName: 'First' }] }
+  const rpc = createHistoryRpc(() => settings)
+  assert.deepEqual((await rpc.handle('projects', {})).value.items, [{ id: 'p1', displayName: 'First' }])
+  settings = { projects: [{ root: second, displayName: 'Second' }] }
+  assert.deepEqual((await rpc.handle('projects', {})).value.items, [{ id: 'p1', displayName: 'Second' }])
+})

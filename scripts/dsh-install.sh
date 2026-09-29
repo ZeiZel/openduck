@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="${DSH_RUNTIME_DIR:-$ROOT_DIR/.dsh-runtime}"
 DSH_HOME_DIR="${DSH_HOME:-$ROOT_DIR/.dsh-home}"
-DSH_VERSION="0.1.0-rc.7"
+DSH_VERSION="0.1.7-rc.2"
 
 usage() {
   printf 'Usage: %s [--runtime DIR] [--home DIR]\n' "$0"
@@ -60,6 +60,8 @@ if [[ "$RUNTIME_DIR" != "$ROOT_DIR/scripts/dsh-runtime" ]]; then
   cp "$ROOT_DIR/scripts/dsh-runtime/package.json" "$RUNTIME_DIR/package.json"
   cp "$ROOT_DIR/scripts/dsh-runtime/pnpm-lock.yaml" "$RUNTIME_DIR/pnpm-lock.yaml"
   cp "$ROOT_DIR/scripts/dsh-runtime/pnpm-workspace.yaml" "$RUNTIME_DIR/pnpm-workspace.yaml"
+  mkdir -p "$RUNTIME_DIR/patches"
+  cp "$ROOT_DIR/scripts/dsh-runtime/patches/fetch-blob@3.2.0.patch" "$RUNTIME_DIR/patches/fetch-blob@3.2.0.patch"
 fi
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm --dir "$RUNTIME_DIR" install --frozen-lockfile --ignore-scripts
 
@@ -76,12 +78,34 @@ if [[ -L "$PROFILE_DIR" ]]; then
   printf 'dsh-install: refusing a symlinked profile directory: %s\n' "$PROFILE_DIR" >&2
   exit 1
 fi
+# Seed the profile's pnpm policy before `dsh plugin install` initializes and
+# resolves its first dependency graph. This keeps the native DOMException
+# replacement active during the very first install as well as upgrades.
+mkdir -p "$PROFILE_DIR/patches"
+cp "$ROOT_DIR/scripts/dsh-runtime/patches/fetch-blob@3.2.0.patch" "$PROFILE_DIR/patches/fetch-blob@3.2.0.patch"
+node - "$PROFILE_DIR/pnpm-workspace.yaml" <<'NODE'
+const fs = require('node:fs')
+const file = process.argv[2]
+let text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n'
+const key = "  'fetch-blob@3.2.0>node-domexception': '-'"
+if (!text.includes("'fetch-blob@3.2.0>node-domexception':")) {
+  if (/^overrides:\s*$/m.test(text)) text = text.replace(/^overrides:\s*$/m, `overrides:\n${key}`)
+  else text = text.replace(/\s*$/, '') + `\noverrides:\n${key}\n`
+}
+if (!/^allowUnusedPatches:/m.test(text)) text = text.replace(/\s*$/, '') + '\nallowUnusedPatches: true\n'
+fs.writeFileSync(file, text)
+NODE
 configure_profile() {
 node - "$PROFILE_DIR/pnpm-workspace.yaml" <<'NODE'
 const fs = require('node:fs')
 const file = process.argv[2]
 let text = fs.readFileSync(file, 'utf8')
-text = text.replace(/^  ['"]@deepseek-ai\/(?:cordis|cosmokit)['"]?:.*\n/gm, '')
+text = text.replace(/^  ['"]@deepseek-ai\/(?:cordis|cosmokit|dsh-app-boot|cordis-plugin-(?:hmr|timer|include|loader))['"]?:.*\n/gm, '')
+// Host peers (cordis, dsh-app-boot, config-editor peers, React) must resolve
+// from the DSH installation. Auto-installing them into the profile creates a
+// second dsh-app-boot instance, and every settings write then fails with
+// "profile reload requires the root Include entry".
+text = text.replace(/^autoInstallPeers:\s*true\s*$/m, 'autoInstallPeers: false')
 // YAML plain scalars cannot start with `@`. Older installer runs wrote scoped
 // package names unquoted, which pnpm correctly rejects; normalize them before
 // applying this policy so a corrected installer can repair its own profile.
@@ -106,30 +130,56 @@ for (const [name, value] of decisions) {
 }
 if (!/^overrides:\s*$/m.test(text)) {
   text += '\noverrides:\n'
-  text += "  '@deepseek-ai/dsh-app-boot': 0.1.0-rc.7\n  '@deepseek-ai/cordis-plugin-hmr': 1.0.16\n  '@deepseek-ai/cordis-plugin-timer': 1.1.3\n  '@deepseek-ai/cordis-plugin-include': 1.0.6\n  '@deepseek-ai/cordis-plugin-loader': 1.0.2\n"
 }
 fs.writeFileSync(file, text)
 NODE
 }
 
 if [[ -f "$PROFILE_DIR/package.json" ]]; then configure_profile; fi
+# The pinned DSH installation already ships dsh-base and dsh-web-app. Select
+# them as installation-owned bundles, exactly like `dsh --from-default-profile
+# web`, instead of installing second copies into the profile: a profile copy
+# brings its own dsh-app-boot/config-editor instances, and every native
+# settings write then fails with "profile reload requires the root Include entry".
+select_installation_bundles() {
 node - "$PROFILE_DIR/package.json" <<'NODE'
 const fs = require('node:fs')
 const file = process.argv[2]
 if (!fs.existsSync(file)) process.exit(0)
 const pkg = JSON.parse(fs.readFileSync(file, 'utf8'))
-for (const [name, spec] of Object.entries(pkg.dependencies ?? {})) {
+const owned = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
+pkg.dependencies ??= {}
+for (const name of owned) delete pkg.dependencies[name]
+for (const [name, spec] of Object.entries(pkg.dependencies)) {
   const candidate = typeof spec === 'string' && spec.startsWith('file:') ? spec.slice(5) : ''
   if (candidate.endsWith('.tgz') && !fs.existsSync(candidate)) delete pkg.dependencies[name]
 }
+pkg.dsh ??= {}
+pkg.dsh.profile ??= {}
+const bundles = Array.isArray(pkg.dsh.profile.bundles) ? pkg.dsh.profile.bundles : []
+pkg.dsh.profile.bundles = [...owned, ...bundles.filter(name => !owned.includes(name))]
 fs.writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`)
 NODE
+}
+select_installation_bundles
 "$DSH_BIN" plugin --profile openduck install
 if [[ -L "$PROFILE_DIR" ]]; then
   printf 'dsh-install: refusing a symlinked profile directory: %s\n' "$PROFILE_DIR" >&2
   exit 1
 fi
 configure_profile
+select_installation_bundles
+node - "$PROFILE_DIR/pnpm-workspace.yaml" <<'NODE'
+const fs = require('node:fs')
+const file = process.argv[2]
+let text = fs.readFileSync(file, 'utf8')
+if (!text.includes('fetch-blob@3.2.0: patches/fetch-blob@3.2.0.patch')) text += '\npatchedDependencies:\n  fetch-blob@3.2.0: patches/fetch-blob@3.2.0.patch\n'
+// The stock bundles (and their fetch-blob) come from the patched installation,
+// so the profile usually has no fetch-blob. Keep the guard for third-party
+// plugins that bring one, without failing installs that do not.
+if (!/^allowUnusedPatches:/m.test(text)) text += '\nallowUnusedPatches: true\n'
+fs.writeFileSync(file, text)
+NODE
 
 BUNDLE_ARCHIVE_DIR="$RUNTIME_DIR/bundles"
 mkdir -p "$BUNDLE_ARCHIVE_DIR"
@@ -152,9 +202,10 @@ ARCHIVE_DIGEST="$(shasum -a 256 "$1" | awk '{print $1}')"
 ARCHIVE_PATH="$BUNDLE_ARCHIVE_DIR/openduck-base-${ARCHIVE_DIGEST}.tgz"
 if [[ ! -f "$ARCHIVE_PATH" ]]; then cp "$1" "$ARCHIVE_PATH"; fi
 
-"$DSH_BIN" plugin --profile openduck add \
-  "@deepseek-ai/dsh-base@$DSH_VERSION" \
-  "@deepseek-ai/dsh-web-app@$DSH_VERSION" \
-  "$ARCHIVE_PATH"
+"$DSH_BIN" plugin --profile openduck add "$ARCHIVE_PATH"
+
+if [[ ! -e "$PROFILE_DIR/openduck-cli-root.disabled" ]]; then
+  "$ROOT_DIR/scripts/dsh-connect.sh" cli-chat
+fi
 
 printf '\nDSH installed at %s\nProfile: %s\nRun: %s\n' "$RUNTIME_DIR" "$DSH_HOME_DIR/profiles/openduck" "$ROOT_DIR/scripts/dsh-run.sh"

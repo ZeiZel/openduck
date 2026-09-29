@@ -14,7 +14,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     browser: Object.freeze({ enabled: false, command: '', args: Object.freeze([]) }),
   }),
   externalPackages: Object.freeze([]),
-  cliRoot: Object.freeze({ enabled: false, cwd: '', models: Object.freeze({ codex: Object.freeze([]), claude: Object.freeze([]), kimi: Object.freeze([]) }) }),
+  cliRoot: Object.freeze({ enabled: true, cwd: '', models: Object.freeze({ codex: Object.freeze([]), claude: Object.freeze([]), kimi: Object.freeze([]) }) }),
 })
 
 const CANONICAL_ABSOLUTE_PATH = /^\/(?:[^/\0]+\/?)*$/
@@ -50,13 +50,6 @@ export function validateSettings(value) {
   if (!Array.isArray(value.externalPackages) || value.externalPackages.some(item => typeof item !== 'string' || item.length === 0 || item.length > 128)) throw new TypeError('openduck: externalPackages must be package names')
   const cliRoot = value.cliRoot
   if (cliRoot === null || typeof cliRoot !== 'object' || typeof cliRoot.enabled !== 'boolean' || typeof cliRoot.cwd !== 'string' || cliRoot.models === null || typeof cliRoot.models !== 'object' || ['codex', 'claude', 'kimi'].some(name => !Array.isArray(cliRoot.models[name]) || cliRoot.models[name].some(model => typeof model !== 'string' || model.length === 0 || model.length > 128))) throw new TypeError('openduck: cliRoot is invalid')
-  if (cliRoot.enabled) {
-    if (!CANONICAL_ABSOLUTE_PATH.test(cliRoot.cwd) || cliRoot.cwd.includes('/../') || cliRoot.cwd.endsWith('/..')) throw new TypeError('openduck: cliRoot.cwd must be an absolute canonical directory')
-    let canonical
-    try { canonical = realpathSync.native(cliRoot.cwd) } catch { throw new TypeError('openduck: cliRoot.cwd must be an existing canonical directory') }
-    if (!statSync(canonical).isDirectory() || canonical !== cliRoot.cwd) throw new TypeError('openduck: cliRoot.cwd must be an existing canonical directory')
-    if (['codex', 'claude', 'kimi'].every(name => cliRoot.models[name].length === 0)) throw new TypeError('openduck: cliRoot requires at least one explicit model')
-  }
   const providers = value.providers
   if (providers === null || typeof providers !== 'object' || Array.isArray(providers)) throw new TypeError('openduck: providers are required')
   for (const name of ['codexCli', 'claudeCli', 'kimiAcp']) {

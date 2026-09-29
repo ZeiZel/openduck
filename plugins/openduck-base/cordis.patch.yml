@@ -1,10 +1,38 @@
 # Generic OpenDuck composition. The base service stays deployment-neutral;
 # Controller adapters are supplied by a separately authenticated overlay.
 - insert:
-    - id: openduck-base
+    # Preserve the legacy settings.yaml section id so RC2 imports existing
+    # OpenDuck CLI/history settings into this entry.
+    - id: openduck
       name: '@openduck/openduck-base'
       config:
         controller:
           enabled: false
         externalPackages: []
-        cliRoot: { enabled: false }
+
+# OpenDuck CLI root chat. DSH 0.1.7 reads agent presets only from
+# `@deepseek-ai/dsh-agent-preset` rows (the registry no longer scans
+# $DSH_HOME/.agent-presets). This is deliberately a complete, text-only
+# composition: no planning, workflow, skill, terminal, filesystem or `tool-*`
+# rows, because those register model-visible schemas. The CLI adapter rejects
+# schemas as defence in depth. `make disconnect-cli-chat` sets
+# OPENDUCK_CLI_ROOT_DISABLED=1 for the next start, which removes the preset.
+- insert:
+    - id: preset-openduck-cli-root
+      name: '@deepseek-ai/dsh-agent-preset'
+      disabled: !!js process.env.OPENDUCK_CLI_ROOT_DISABLED === '1'
+      config:
+        id: openduck-cli-root
+        name: OpenDuck · CLI root chat
+        description: Chat through an installed Codex, Claude or Kimi CLI subscription in the session workspace. Text-only; DSH host tools are not available.
+        order: 20
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are a text-only assistant. You have no filesystem, terminal, browser,
+                MCP, delegation, or other host tools. Do not claim to have performed an
+                action outside this conversation.
+              complete: true
+              includeRuntimeContext: false

@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","cwd":"/work/synthetic","session_id":"00000000-0000-4000-8000-000000000001","tools":[],"mcp_servers":[],"model":"claude-opus-5-5[1m]","permissionMode":"dontAsk","claude_code_version":"2.1.280","uuid":"redacted"}
+{"type":"assistant","message":{"model":"claude-opus-5-5","id":"msg_redacted","type":"message","role":"assistant","content":[{"type":"text","text":"ок"}],"stop_reason":null,"stop_sequence":null},"parent_tool_use_id":null,"session_id":"00000000-0000-4000-8000-000000000001","uuid":"redacted"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"},"uuid":"redacted","session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1762,"num_turns":1,"result":"ок","stop_reason":"end_turn","session_id":"00000000-0000-4000-8000-000000000001","uuid":"redacted"}

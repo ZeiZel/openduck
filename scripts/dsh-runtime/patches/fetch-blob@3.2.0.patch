@@ -1,0 +1,14 @@
+diff --git a/from.js b/from.js
+index 9eaf8bfc191aef9218ad382b5149b2b6207b4812..4da8685498654eb273806f3a725335eff74553cb 100644
+--- a/from.js
++++ b/from.js
+@@ -1,6 +1,8 @@
+ import { statSync, createReadStream, promises as fs } from 'node:fs'
+ import { basename } from 'node:path'
+-import DOMException from 'node-domexception'
++// Node 22 provides the standards DOMException globally. Keep this package
++// independent of the deprecated node-domexception shim.
++const DOMException = globalThis.DOMException
+ 
+ import File from './file.js'
+ import Blob from './index.js'
